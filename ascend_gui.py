@@ -46,6 +46,96 @@ def course_target(course: Course, sem: Semester) -> float:
     return float(min_percentage_for_grade_point(sem.target_sgpa))
 
 
+def current_target_letter(course: Course, sem: Semester) -> str:
+    letter, _ = percentage_to_grade(course_target(course, sem))
+    return letter if letter in LETTER_OPTIONS else "A-"
+
+
+def render_required_report(course: Course, sem: Semester) -> None:
+    target = course_target(course, sem)
+    if course.target_percent is None:
+        ui.label(
+            f"(No course-specific target — using semester's uniform target: {target:.0f}%)"
+        ).classes("cli-hint mb-2")
+
+    ui.label(f"Required Marks Report: {course.name} (target {target:.0f}%)").classes(
+        "text-violet-300 font-semibold"
+    )
+
+    try:
+        report = course.required_report(target_percent=target)
+    except ValueError as e:
+        ui.label(str(e)).classes("text-rose-400")
+        return
+
+    for portion_key, portion_obj in (("theory", course.theory), ("lab", course.lab)):
+        if portion_key not in report or portion_obj is None:
+            continue
+        p = report[portion_key]
+        ui.label(f"-- {portion_key.upper()} --").classes("text-sky-300 font-semibold mt-3")
+
+        if p.get("status") == "complete":
+            locked = p.get("actual_percent")
+            if locked is None:
+                locked = portion_obj.final_percent()
+            letter, gp = percentage_to_grade(float(locked))
+            ui.label(
+                f"Complete. Locked-in percentage: {locked}% ({letter}, {gp:.2f})"
+            ).classes("cli-text")
+            status = portion_obj.pace_status(float(p.get("target_percent", target)))
+            ui.label(pace_message(status, portion_key.upper())).classes("cli-text")
+        else:
+            status = portion_obj.pace_status(float(p.get("target_percent", target)))
+            ui.label(pace_message(status, portion_key.upper())).classes("cli-text")
+            ui.label(
+                f"Achieved so far: {p.get('achieved_so_far', 0)} percentage points | "
+                f"Remaining weight: {p.get('remaining_weight', 0)}%"
+            ).classes("cli-text")
+            req = p.get("required_avg_on_remaining")
+            if req is not None:
+                ui.label(f"Required average on all remaining items: {req:.2f}%").classes("cli-text")
+                if req <= 0:
+                    ui.label("Target already secured in this portion.").classes("text-sky-300 text-sm")
+                elif not p.get("achievable", True):
+                    ui.label(
+                        "Target is not mathematically achievable in this portion with remaining work."
+                    ).classes("text-rose-400 text-sm")
+
+        for comp in p.get("components", []):
+            for it in comp["items"]:
+                if it["completed"]:
+                    ui.label(
+                        f"  {comp['name']} > {it['name']}: "
+                        f"{it['obtained_marks']} / {it['max_marks']} (entered)"
+                    ).classes("cli-text text-sm text-gray-400")
+                elif "required_marks" in it:
+                    ui.label(
+                        f"  {comp['name']} > {it['name']}: need "
+                        f"{it['required_marks']} / {it['max_marks']}  ({it['required_percent']}%)"
+                    ).classes("cli-text text-sm text-sky-200")
+                else:
+                    ui.label(
+                        f"  {comp['name']} > {it['name']}: out of {it['max_marks']} (not entered)"
+                    ).classes("cli-text text-sm")
+
+    if course.is_complete():
+        overall = course.overall_percent()
+        letter, gp = course.grade()
+        ui.label(f"Course locked in: {overall:.2f}% ({letter}, {gp:.2f})").classes(
+            "cli-text text-sky-300 mt-4"
+        )
+        if overall >= target - 1e-9:
+            ui.label("Target grade achieved for this course.").classes("cli-text")
+        else:
+            ui.label(f"Below target of {target:.0f}% for this course.").classes("cli-text")
+    else:
+        proj = course.projected_percent()
+        letter, gp = percentage_to_grade(proj)
+        ui.label(f"Projected course standing: {proj:.1f}% ({letter}, {gp:.2f})").classes(
+            "cli-text mt-4"
+        )
+
+
 def apply_page_theme() -> None:
     ui.colors(
         primary="#7c3aed",
@@ -624,6 +714,10 @@ def course_page(course_idx: int) -> None:
         ).classes("cli-hint")
 
         @ui.refreshable
+        def required_report_panel() -> None:
+            render_required_report(sem.courses[course_idx], sem)
+
+        @ui.refreshable
         def course_panels() -> None:
             c = sem.courses[course_idx]
             target = course_target(c, sem)
@@ -636,7 +730,7 @@ def course_page(course_idx: int) -> None:
 
             # ---- Set / change target ----
             with ui.card().classes("glass-card w-full p-5"):
-                ui.label(f"--- Set Target: {c.name} ---").classes("text-violet-300 font-semibold")
+                ui.label(f"Set Target: {c.name}").classes("text-violet-300 font-semibold")
                 current = (
                     f"{c.target_percent:.0f}%"
                     if c.target_percent is not None
@@ -650,12 +744,16 @@ def course_page(course_idx: int) -> None:
                 ).props(FIELD).classes("w-full")
                 letter_in = ui.select(
                     LETTER_OPTIONS,
-                    value="A-",
+                    value=current_target_letter(c, sem),
                     label="Target letter grade (e.g. A, A-, B+, B, B-, C+, C, C-, D+, D)",
                 ).props(FIELD).classes("w-full")
-                pct_in = ui.number("Target percent (e.g. 85)", value=85, min=0, max=100, step=1).props(
-                    FIELD
-                ).classes("w-full")
+                pct_in = ui.number(
+                    "Target percent (e.g. 85)",
+                    value=target,
+                    min=0,
+                    max=100,
+                    step=1,
+                ).props(FIELD).classes("w-full")
 
                 def sync_mode() -> None:
                     is_letter = mode.value == "l"
@@ -686,15 +784,15 @@ def course_page(course_idx: int) -> None:
                         except ValueError:
                             ui.notify("Unrecognised letter grade — nothing changed.", color="negative")
                             return
+                    required_report_panel.refresh()
+                    what_if_panel.refresh()
                     course_panels.refresh()
 
                 ui.button("Save target", on_click=save_target).props("color=primary unelevated")
 
             # ---- Enter marks ----
             with ui.card().classes("glass-card w-full p-5"):
-                ui.label("--- Enter marks for a course ---").classes(
-                    "text-violet-300 font-semibold"
-                )
+                ui.label("Enter marks for a course").classes("text-violet-300 font-semibold")
                 portions: List[Tuple[str, object]] = [("theory", c.theory)]
                 if c.has_lab and c.lab:
                     portions.append(("lab", c.lab))
@@ -801,7 +899,9 @@ def course_page(course_idx: int) -> None:
                                     )
                         if saved_any:
                             save_data()
-                            course_panels.refresh()
+                            marks_form.refresh()
+                            required_report_panel.refresh()
+                            what_if_panel.refresh()
                         else:
                             ui.notify("Enter at least one mark value to save.", color="warning")
 
@@ -812,180 +912,142 @@ def course_page(course_idx: int) -> None:
                 portion_choice.on_value_change(lambda _: marks_form.refresh())
                 marks_form()
 
-            # ---- Required marks report ----
-            with ui.card().classes("glass-card w-full p-5"):
-                ui.label(
-                    f"=== Required Marks Report: {c.name} (target {target:.0f}%) ==="
-                ).classes("text-violet-300 font-semibold")
-                try:
-                    report = c.required_report(target_percent=target)
-                except ValueError as e:
-                    ui.label(str(e)).classes("text-rose-400")
-                    report = {}
+        @ui.refreshable
+        def what_if_panel() -> None:
+            c = sem.courses[course_idx]
+            ui.label("What do I need on ONE specific upcoming item?").classes(
+                "text-violet-300 font-semibold"
+            )
+            portions2: List[Tuple[str, object]] = [("theory", c.theory)]
+            if c.has_lab and c.lab:
+                portions2.append(("lab", c.lab))
+            which2 = ui.select(
+                {p[0]: p[0].capitalize() for p in portions2},
+                value="theory",
+                label="Theory or Lab component?",
+            ).props(FIELD).classes("w-full")
+            result_box = ui.column().classes("w-full mt-2")
 
-                for portion_key, portion_obj in (("theory", c.theory), ("lab", c.lab)):
-                    if portion_key not in report or portion_obj is None:
-                        continue
-                    p = report[portion_key]
-                    ui.label(f"-- {portion_key.upper()} --").classes("text-sky-300 font-semibold mt-3")
-                    if p.get("status") == "complete":
+            def run_what_if() -> None:
+                result_box.clear()
+                pname = which2.value or "theory"
+                portion = c.theory if pname == "theory" else c.lab
+                with result_box:
+                    if portion is None:
+                        ui.label("Portion not available.").classes("text-rose-400")
+                        return
+                    pending = [
+                        (comp.name, it)
+                        for comp in portion.components
+                        for it in comp.items
+                        if not it.is_completed
+                    ]
+                    if not pending:
                         ui.label(
-                            f"Complete. Locked-in percentage: {p['actual_percent']}%"
+                            "Nothing pending in this portion — it's fully graded."
                         ).classes("cli-text")
-                        continue
-                    status = portion_obj.pace_status(p["target_percent"])
-                    ui.label(pace_message(status, portion_key.upper())).classes("cli-text")
-                    ui.label(
-                        f"Achieved so far: {p['achieved_so_far']} percentage points | "
-                        f"Remaining weight: {p['remaining_weight']}%"
-                    ).classes("cli-text")
-                    for comp in p["components"]:
-                        for it in comp["items"]:
-                            if it["completed"]:
-                                ui.label(
-                                    f"  {comp['name']} > {it['name']}: already "
-                                    f"{it['obtained_marks']} / {it['max_marks']}"
-                                ).classes("cli-text text-sm text-gray-400")
-                                continue
-                            if "required_marks" in it:
-                                ui.label(
-                                    f"  {comp['name']} > {it['name']}: need "
-                                    f"{it['required_marks']} / {it['max_marks']}  ({it['required_percent']}%)"
-                                ).classes("cli-text text-sm")
-                            else:
-                                ui.label(
-                                    f"  {comp['name']} > {it['name']}: out of {it['max_marks']} (not entered)"
-                                ).classes("cli-text text-sm")
+                        return
+                    ui.label("Pending items:").classes("text-white")
+                    labels = {
+                        i: f"[{i}] {comp_name} > {it.name}  (out of {it.max_marks})"
+                        for i, (comp_name, it) in enumerate(pending)
+                    }
+                    pick = ui.select(
+                        labels, value=0, label="Which one are you about to take?"
+                    ).props(FIELD).classes("w-full")
+                    assume_toggle = ui.switch(
+                        "Assume specific scores on the OTHER pending items instead of the flat average?",
+                        value=False,
+                    ).props("color=primary")
+                    assumed_fields: Dict[str, ui.number] = {}
+                    assumed_col = ui.column().classes("w-full")
 
-            # ---- What-if one item ----
-            with ui.card().classes("glass-card w-full p-5"):
-                ui.label("What do I need on ONE specific upcoming item?").classes(
-                    "text-violet-300 font-semibold"
-                )
-                portions2: List[Tuple[str, object]] = [("theory", c.theory)]
-                if c.has_lab and c.lab:
-                    portions2.append(("lab", c.lab))
-                which2 = ui.select(
-                    {p[0]: p[0].capitalize() for p in portions2},
-                    value="theory",
-                    label="Theory or Lab component?",
-                ).props(FIELD).classes("w-full")
-                result_box = ui.column().classes("w-full mt-2")
-
-                def run_what_if() -> None:
-                    result_box.clear()
-                    pname = which2.value or "theory"
-                    portion = c.theory if pname == "theory" else c.lab
-                    with result_box:
-                        if portion is None:
-                            ui.label("Portion not available.").classes("text-rose-400")
+                    def rebuild_assumed() -> None:
+                        assumed_col.clear()
+                        assumed_fields.clear()
+                        if not assume_toggle.value:
                             return
-                        pending = [
-                            (comp.name, it)
-                            for comp in portion.components
-                            for it in comp.items
-                            if not it.is_completed
-                        ]
-                        if not pending:
-                            ui.label(
-                                "Nothing pending in this portion — it's fully graded."
-                            ).classes("cli-text")
+                        with assumed_col:
+                            for i, (_cn, it) in enumerate(pending):
+                                if i == pick.value:
+                                    continue
+                                assumed_fields[it.name.lower()] = ui.number(
+                                    f"Expected % on '{it.name}' (blank = use flat average)",
+                                    value=None,
+                                    min=0,
+                                    max=100,
+                                    step=0.5,
+                                ).props(FIELD).classes("w-full")
+
+                    assume_toggle.on_value_change(lambda _: rebuild_assumed())
+                    pick.on_value_change(lambda _: rebuild_assumed())
+                    rebuild_assumed()
+
+                    def compute() -> None:
+                        idx = int(pick.value if pick.value is not None else 0)
+                        if not (0 <= idx < len(pending)):
+                            ui.notify("Invalid choice.", color="negative")
                             return
-                        ui.label("Pending items:").classes("text-white")
-                        labels = {
-                            i: f"[{i}] {comp_name} > {it.name}  (out of {it.max_marks})"
-                            for i, (comp_name, it) in enumerate(pending)
-                        }
-                        pick = ui.select(
-                            labels, value=0, label="Which one are you about to take?"
-                        ).props(FIELD).classes("w-full")
-                        assume_toggle = ui.switch(
-                            "Assume specific scores on the OTHER pending items instead of the flat average?",
-                            value=False,
-                        ).props("color=primary")
-                        assumed_fields: Dict[str, ui.number] = {}
-                        assumed_col = ui.column().classes("w-full")
-
-                        def rebuild_assumed() -> None:
-                            assumed_col.clear()
-                            assumed_fields.clear()
-                            if not assume_toggle.value:
-                                return
-                            with assumed_col:
-                                for i, (_cn, it) in enumerate(pending):
-                                    if i == pick.value:
-                                        continue
-                                    assumed_fields[it.name.lower()] = ui.number(
-                                        f"Expected % on '{it.name}' (blank = use flat average)",
-                                        value=None,
-                                        min=0,
-                                        max=100,
-                                        step=0.5,
-                                    ).props(FIELD).classes("w-full")
-
-                        assume_toggle.on_value_change(lambda _: rebuild_assumed())
-                        pick.on_value_change(lambda _: rebuild_assumed())
-                        rebuild_assumed()
-
-                        def compute() -> None:
-                            idx = int(pick.value if pick.value is not None else 0)
-                            if not (0 <= idx < len(pending)):
-                                ui.notify("Invalid choice.", color="negative")
-                                return
-                            _, target_item = pending[idx]
-                            assumed = {}
-                            for k, f in assumed_fields.items():
-                                if f.value is not None and f.value != "":
-                                    assumed[k] = float(f.value)
-                            tgt = course_target(c, sem)
-                            needed_pct = c.required_for_item(
-                                pname,
-                                target_item.name,
-                                target_percent=tgt,
-                                assumed_scores=assumed,
-                            )
-                            if needed_pct is None:
-                                ui.notify(
-                                    "Could not compute — check the item and try again.",
-                                    color="negative",
-                                )
-                                return
-                            needed_marks = (needed_pct / 100) * target_item.max_marks
+                        _, target_item = pending[idx]
+                        assumed = {}
+                        for k, f in assumed_fields.items():
+                            if f.value is not None and f.value != "":
+                                assumed[k] = float(f.value)
+                        tgt = course_target(c, sem)
+                        needed_pct = c.required_for_item(
+                            pname,
+                            target_item.name,
+                            target_percent=tgt,
+                            assumed_scores=assumed,
+                        )
+                        if needed_pct is None:
                             ui.notify(
-                                f"To hit {tgt:.0f}% overall (with your assumptions on the rest):",
-                                color="info",
+                                "Could not compute — check the item and try again.",
+                                color="negative",
                             )
-                            if needed_pct > 100:
-                                ui.notify(
-                                    f"you'd need {needed_pct:.2f}% on '{target_item.name}' — "
-                                    "that's above 100%, not achievable here. "
-                                    "You'll need a higher score elsewhere, or accept a lower grade in this course.",
-                                    color="warning",
-                                    timeout=8,
-                                )
-                            elif needed_pct < 0:
-                                ui.notify(
-                                    f"'{target_item.name}' is already covered — you could score 0 here "
-                                    "and still be on track.",
-                                    color="positive",
-                                    timeout=6,
-                                )
-                            else:
-                                ui.notify(
-                                    f"you need {needed_marks:.2f} / {target_item.max_marks} "
-                                    f"({needed_pct:.2f}%) on '{target_item.name}'.",
-                                    color="positive",
-                                    timeout=8,
-                                )
+                            return
+                        needed_marks = (needed_pct / 100) * target_item.max_marks
+                        ui.notify(
+                            f"To hit {tgt:.0f}% overall (with your assumptions on the rest):",
+                            color="info",
+                        )
+                        if needed_pct > 100:
+                            ui.notify(
+                                f"you'd need {needed_pct:.2f}% on '{target_item.name}' — "
+                                "that's above 100%, not achievable here. "
+                                "You'll need a higher score elsewhere, or accept a lower grade in this course.",
+                                color="warning",
+                                timeout=8,
+                            )
+                        elif needed_pct < 0:
+                            ui.notify(
+                                f"'{target_item.name}' is already covered — you could score 0 here "
+                                "and still be on track.",
+                                color="positive",
+                                timeout=6,
+                            )
+                        else:
+                            ui.notify(
+                                f"you need {needed_marks:.2f} / {target_item.max_marks} "
+                                f"({needed_pct:.2f}%) on '{target_item.name}'.",
+                                color="positive",
+                                timeout=8,
+                            )
 
-                        ui.button("Compute required score", on_click=compute).props(
-                            "color=secondary unelevated"
-                        ).classes("mt-2")
+                    ui.button("Compute required score", on_click=compute).props(
+                        "color=secondary unelevated"
+                    ).classes("mt-2")
 
-                ui.button("Open calculator", on_click=run_what_if).props("outline color=primary")
-                run_what_if()
+            ui.button("Open calculator", on_click=run_what_if).props("outline color=primary")
+            run_what_if()
 
         course_panels()
+
+        with ui.card().classes("glass-card w-full p-5"):
+            required_report_panel()
+
+        with ui.card().classes("glass-card w-full p-5"):
+            what_if_panel()
 
 
 # --------------------------------------------------------------------------- #

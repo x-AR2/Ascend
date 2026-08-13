@@ -424,6 +424,8 @@ class Course:
         else:
             rep["required_avg_on_remaining"] = round(required_avg, 2)
             rep["achievable"] = required_avg <= 100.0001
+        if rep["status"] == "complete":
+            rep["actual_percent"] = round(portion.final_percent(), 2)
         # per-component breakdown of what's left, with the exact score needed on EACH item
         rep["components"] = []
         for c in portion.components:
