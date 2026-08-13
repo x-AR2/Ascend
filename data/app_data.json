@@ -1,0 +1,22 @@
+{
+  "semesters": [
+    {
+      "name": "This Semester",
+      "target_sgpa": 3.2,
+      "courses": [],
+      "finalized": false,
+      "actual_sgpa": null
+    },
+    {
+      "name": "Sem 4",
+      "target_sgpa": 3.9,
+      "courses": [],
+      "finalized": false,
+      "actual_sgpa": null
+    }
+  ],
+  "active_semester_index": 1,
+  "cgpa": {
+    "semesters": []
+  }
+}
