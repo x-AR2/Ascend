@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 from typing import Dict, List, Optional, Tuple
 
 from nicegui import app, ui
@@ -13,15 +15,51 @@ from models import Course, Semester
 from storage import AppData
 
 
-DATA_PATH = "data/app_data.json"
-app_data = AppData.load(DATA_PATH)
+DEFAULT_DATA_PATH = "data/app_data.json"
+app_data = AppData.load(DEFAULT_DATA_PATH)
 
 LETTER_OPTIONS = ["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D"]
 FIELD = "outlined dark color=primary stack-label"
 
 
+def user_data_path() -> str:
+    email = app.storage.user.get("auth_email")
+    if not email:
+        return DEFAULT_DATA_PATH
+    safe = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:16]
+    return os.path.join("data", "users", f"{safe}.json")
+
+
+def reload_app_data() -> None:
+    global app_data
+    path = user_data_path()
+    app_data = AppData.load(path)
+
+
+def ensure_user_data() -> None:
+    """Load persisted data for the logged-in user (per-account storage)."""
+    if app.storage.user.get("auth_email"):
+        reload_app_data()
+
+
 def save_data() -> None:
-    app_data.save(DATA_PATH)
+    path = user_data_path()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    app_data.save(path)
+
+
+def bind_user(email: str, *, is_new: bool = False) -> None:
+    global app_data
+    app.storage.user["auth_email"] = email.strip().lower()
+    path = user_data_path()
+    if os.path.exists(path):
+        app_data = AppData.load(path)
+        return
+    # First login/signup: keep whatever is already in memory (or the shared file)
+    # so existing courses are not wiped, then persist under this account.
+    if not app_data.semesters and os.path.exists(DEFAULT_DATA_PATH):
+        app_data = AppData.load(DEFAULT_DATA_PATH)
+    save_data()
 
 
 def ensure_semester() -> Semester:
@@ -56,11 +94,11 @@ def render_required_report(course: Course, sem: Semester) -> None:
     if course.target_percent is None:
         ui.label(
             f"(No course-specific target — using semester's uniform target: {target:.0f}%)"
-        ).classes("cli-hint mb-2")
+        ).classes("cli-hint mb-3")
 
-    ui.label(f"Required Marks Report: {course.name} (target {target:.0f}%)").classes(
-        "text-violet-300 font-semibold"
-    )
+    with ui.row().classes("w-full items-center justify-between flex-wrap gap-2 mb-4"):
+        ui.label(f"Required Marks Report — {course.name}").classes("text-violet-300 font-semibold text-lg")
+        ui.label(f"Target: {target:.0f}%").classes("grade-chip")
 
     try:
         report = course.required_report(target_percent=target)
@@ -72,68 +110,104 @@ def render_required_report(course: Course, sem: Semester) -> None:
         if portion_key not in report or portion_obj is None:
             continue
         p = report[portion_key]
-        ui.label(f"-- {portion_key.upper()} --").classes("text-sky-300 font-semibold mt-3")
 
-        if p.get("status") == "complete":
-            locked = p.get("actual_percent")
-            if locked is None:
-                locked = portion_obj.final_percent()
-            letter, gp = percentage_to_grade(float(locked))
+        with ui.card().classes("glass-card w-full p-4 mt-3"):
+            ui.label(portion_key.upper()).classes("text-sky-300 font-bold tracking-wider text-sm mb-2")
+
+            if p.get("status") == "complete":
+                locked = p.get("actual_percent")
+                if locked is None:
+                    locked = portion_obj.final_percent()
+                letter, gp = percentage_to_grade(float(locked))
+                with ui.row().classes("gap-3 flex-wrap items-center"):
+                    ui.label(f"Locked in: {locked}%").classes("text-white font-semibold")
+                    ui.label(f"{letter} ({gp:.2f})").classes("grade-chip")
+                status = portion_obj.pace_status(float(p.get("target_percent", target)))
+                with ui.element("div").classes("pace-box w-full"):
+                    ui.label(pace_message(status, portion_key.upper())).classes("cli-text")
+            else:
+                status = portion_obj.pace_status(float(p.get("target_percent", target)))
+                with ui.element("div").classes("pace-box w-full"):
+                    ui.label(pace_message(status, portion_key.upper())).classes("cli-text")
+                with ui.row().classes("w-full gap-4 mt-3 flex-wrap"):
+                    with ui.column().classes("min-w-40"):
+                        ui.label("Achieved so far").classes("text-gray-400 text-xs uppercase")
+                        ui.label(f"{p.get('achieved_so_far', 0)} pts").classes("text-white font-semibold")
+                    with ui.column().classes("min-w-40"):
+                        ui.label("Remaining weight").classes("text-gray-400 text-xs uppercase")
+                        ui.label(f"{p.get('remaining_weight', 0)}%").classes("text-white font-semibold")
+                    req = p.get("required_avg_on_remaining")
+                    if req is not None:
+                        with ui.column().classes("min-w-40"):
+                            ui.label("Need on remaining").classes("text-gray-400 text-xs uppercase")
+                            ui.label(f"{req:.2f}% avg").classes(
+                                "text-sky-300 font-semibold"
+                                if p.get("achievable", True)
+                                else "text-rose-400 font-semibold"
+                            )
+
+            rows = []
+            for comp in p.get("components", []):
+                for it in comp["items"]:
+                    if it["completed"]:
+                        rows.append(
+                            {
+                                "component": comp["name"],
+                                "item": it["name"],
+                                "status": "Entered",
+                                "score": f"{it['obtained_marks']} / {it['max_marks']}",
+                                "required": "—",
+                            }
+                        )
+                    elif "required_marks" in it:
+                        rows.append(
+                            {
+                                "component": comp["name"],
+                                "item": it["name"],
+                                "status": "Pending",
+                                "score": "—",
+                                "required": f"{it['required_marks']} / {it['max_marks']} ({it['required_percent']}%)",
+                            }
+                        )
+                    else:
+                        rows.append(
+                            {
+                                "component": comp["name"],
+                                "item": it["name"],
+                                "status": "Not entered",
+                                "score": "—",
+                                "required": f"out of {it['max_marks']}",
+                            }
+                        )
+            if rows:
+                ui.table(
+                    columns=[
+                        {"name": "component", "label": "Component", "field": "component", "align": "left"},
+                        {"name": "item", "label": "Assessment", "field": "item", "align": "left"},
+                        {"name": "status", "label": "Status", "field": "status", "align": "center"},
+                        {"name": "score", "label": "Your Score", "field": "score", "align": "center"},
+                        {"name": "required", "label": "Required", "field": "required", "align": "left"},
+                    ],
+                    rows=rows,
+                    row_key="item",
+                ).classes("w-full ascend-table mt-3").props("flat bordered dense separator=horizontal")
+
+    with ui.card().classes("glass-card w-full p-4 mt-4"):
+        ui.label("Course summary").classes("text-violet-300 font-semibold mb-2")
+        if course.is_complete():
+            overall = course.overall_percent()
+            letter, gp = course.grade()
+            ui.label(f"Locked-in: {overall:.2f}% → {letter} ({gp:.2f})").classes("text-sky-300")
             ui.label(
-                f"Complete. Locked-in percentage: {locked}% ({letter}, {gp:.2f})"
-            ).classes("cli-text")
-            status = portion_obj.pace_status(float(p.get("target_percent", target)))
-            ui.label(pace_message(status, portion_key.upper())).classes("cli-text")
+                "Target grade achieved." if overall >= target - 1e-9 else f"Below target of {target:.0f}%."
+            ).classes("cli-text mt-1")
         else:
-            status = portion_obj.pace_status(float(p.get("target_percent", target)))
-            ui.label(pace_message(status, portion_key.upper())).classes("cli-text")
-            ui.label(
-                f"Achieved so far: {p.get('achieved_so_far', 0)} percentage points | "
-                f"Remaining weight: {p.get('remaining_weight', 0)}%"
-            ).classes("cli-text")
-            req = p.get("required_avg_on_remaining")
-            if req is not None:
-                ui.label(f"Required average on all remaining items: {req:.2f}%").classes("cli-text")
-                if req <= 0:
-                    ui.label("Target already secured in this portion.").classes("text-sky-300 text-sm")
-                elif not p.get("achievable", True):
-                    ui.label(
-                        "Target is not mathematically achievable in this portion with remaining work."
-                    ).classes("text-rose-400 text-sm")
-
-        for comp in p.get("components", []):
-            for it in comp["items"]:
-                if it["completed"]:
-                    ui.label(
-                        f"  {comp['name']} > {it['name']}: "
-                        f"{it['obtained_marks']} / {it['max_marks']} (entered)"
-                    ).classes("cli-text text-sm text-gray-400")
-                elif "required_marks" in it:
-                    ui.label(
-                        f"  {comp['name']} > {it['name']}: need "
-                        f"{it['required_marks']} / {it['max_marks']}  ({it['required_percent']}%)"
-                    ).classes("cli-text text-sm text-sky-200")
-                else:
-                    ui.label(
-                        f"  {comp['name']} > {it['name']}: out of {it['max_marks']} (not entered)"
-                    ).classes("cli-text text-sm")
-
-    if course.is_complete():
-        overall = course.overall_percent()
-        letter, gp = course.grade()
-        ui.label(f"Course locked in: {overall:.2f}% ({letter}, {gp:.2f})").classes(
-            "cli-text text-sky-300 mt-4"
-        )
-        if overall >= target - 1e-9:
-            ui.label("Target grade achieved for this course.").classes("cli-text")
-        else:
-            ui.label(f"Below target of {target:.0f}% for this course.").classes("cli-text")
-    else:
-        proj = course.projected_percent()
-        letter, gp = percentage_to_grade(proj)
-        ui.label(f"Projected course standing: {proj:.1f}% ({letter}, {gp:.2f})").classes(
-            "cli-text mt-4"
-        )
+            proj = course.projected_percent()
+            letter, gp = percentage_to_grade(proj)
+            ui.label(f"Projected from saved marks: {proj:.1f}% → {letter} ({gp:.2f})").classes("text-sky-300")
+            best = course.best_case_percent()
+            bletter, bgp = percentage_to_grade(best)
+            ui.label(f"Best case if you ace the rest: {best:.1f}% → {bletter} ({bgp:.2f})").classes("cli-hint mt-1")
 
 
 def apply_page_theme() -> None:
@@ -215,6 +289,22 @@ def apply_page_theme() -> None:
     }
     .ascend-table tbody tr:hover td {
         background: rgba(124, 58, 237, 0.12);
+    }
+    .pace-box {
+        background: rgba(30, 41, 59, 0.65);
+        border-left: 3px solid #7c3aed;
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin: 8px 0;
+    }
+    .grade-chip {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 999px;
+        background: rgba(56, 189, 248, 0.15);
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        color: #7dd3fc;
+        font-weight: 600;
     }
 </style>
 """
@@ -341,7 +431,8 @@ def login_page() -> None:
             ui.notify("Please enter both email and password.", color="negative")
             return
         app.storage.user["auth_email"] = email
-        ui.notify("Login successful (frontend mock).", color="positive")
+        bind_user(email, is_new=False)
+        ui.notify("Login successful.", color="positive")
         ui.navigate.to("/dashboard")
 
     auth_card("Login to Ascend", "Continue your semester momentum.", "Login", do_login)
@@ -359,7 +450,8 @@ def signup_page() -> None:
             ui.notify("Passwords do not match.", color="negative")
             return
         app.storage.user["auth_email"] = email
-        ui.notify("Account created (frontend mock).", color="positive")
+        bind_user(email, is_new=True)
+        ui.notify("Account created. Your data will be saved to your profile.", color="positive")
         ui.navigate.to("/dashboard")
 
     auth_card("Sign Up for Ascend", "Create your profile and start tracking.", "Create Account", do_signup)
@@ -471,6 +563,7 @@ def show_grade_scale() -> None:
 @ui.page("/dashboard")
 def dashboard_page() -> None:
     apply_page_theme()
+    ensure_user_data()
     nav_bar()
     sem = ensure_semester()
 
@@ -532,7 +625,7 @@ def dashboard_page() -> None:
 
             def save_now() -> None:
                 save_data()
-                ui.notify(f"Saved to {DATA_PATH}", color="positive")
+                ui.notify(f"Saved to {user_data_path()}", color="positive")
 
             ui.button(
                 "Apply uniform target to all courses in active semester",
@@ -690,6 +783,7 @@ def dashboard_page() -> None:
 @ui.page("/course/{course_idx}")
 def course_page(course_idx: int) -> None:
     apply_page_theme()
+    ensure_user_data()
     nav_bar()
     sem = ensure_semester()
 
@@ -915,131 +1009,158 @@ def course_page(course_idx: int) -> None:
         @ui.refreshable
         def what_if_panel() -> None:
             c = sem.courses[course_idx]
-            ui.label("What do I need on ONE specific upcoming item?").classes(
-                "text-violet-300 font-semibold"
-            )
+            tgt = course_target(c, sem)
+            proj = c.projected_percent()
+            letter, gp = percentage_to_grade(proj)
+
+            ui.label("Grade calculator").classes("text-violet-300 font-semibold text-lg")
+            ui.label(
+                "Uses saved marks plus the official grading scale to tell you the current / projected letter grade, "
+                "and what you still need on one upcoming item."
+            ).classes("cli-hint mb-3")
+
+            with ui.row().classes("w-full gap-4 flex-wrap mb-4"):
+                with ui.card().classes("glass-card p-4 min-w-44"):
+                    ui.label("From saved marks").classes("text-gray-400 text-xs uppercase")
+                    ui.label(f"{proj:.1f}%").classes("text-2xl font-bold text-sky-300")
+                    ui.label(f"{letter}  ({gp:.2f})").classes("grade-chip mt-1")
+                if c.is_complete():
+                    overall = c.overall_percent()
+                    fl, fgp = c.grade()
+                    with ui.card().classes("glass-card p-4 min-w-44"):
+                        ui.label("Locked-in grade").classes("text-gray-400 text-xs uppercase")
+                        ui.label(f"{overall:.1f}%").classes("text-2xl font-bold text-white")
+                        ui.label(f"{fl}  ({fgp:.2f})").classes("grade-chip mt-1")
+                else:
+                    best = c.best_case_percent()
+                    bl, bgp = percentage_to_grade(best)
+                    with ui.card().classes("glass-card p-4 min-w-44"):
+                        ui.label("Best case remaining").classes("text-gray-400 text-xs uppercase")
+                        ui.label(f"{best:.1f}%").classes("text-2xl font-bold text-violet-300")
+                        ui.label(f"{bl}  ({bgp:.2f})").classes("grade-chip mt-1")
+
             portions2: List[Tuple[str, object]] = [("theory", c.theory)]
             if c.has_lab and c.lab:
                 portions2.append(("lab", c.lab))
+
             which2 = ui.select(
                 {p[0]: p[0].capitalize() for p in portions2},
                 value="theory",
                 label="Theory or Lab component?",
             ).props(FIELD).classes("w-full")
-            result_box = ui.column().classes("w-full mt-2")
 
-            def run_what_if() -> None:
+            item_select = ui.select(
+                {},
+                label="Which one are you about to take?",
+            ).props(FIELD).classes("w-full")
+            assume_toggle = ui.switch(
+                "Assume specific scores on the OTHER pending items instead of the flat average?",
+                value=False,
+            ).props("color=primary")
+            assumed_col = ui.column().classes("w-full")
+            assumed_fields: Dict[str, ui.number] = {}
+            result_box = ui.column().classes("w-full mt-3")
+
+            def pending_for(portion_name: str):
+                portion = c.theory if portion_name == "theory" else c.lab
+                if portion is None:
+                    return []
+                return [
+                    (comp.name, it)
+                    for comp in portion.components
+                    for it in comp.items
+                    if not it.is_completed
+                ]
+
+            def fill_items() -> None:
+                pending = pending_for(which2.value or "theory")
+                if not pending:
+                    item_select.set_options({})
+                    item_select.value = None
+                    return
+                item_select.set_options(
+                    {i: f"{comp_name} > {it.name}  (out of {it.max_marks})" for i, (comp_name, it) in enumerate(pending)}
+                )
+                item_select.value = 0
+
+            def rebuild_assumed() -> None:
+                assumed_col.clear()
+                assumed_fields.clear()
+                if not assume_toggle.value:
+                    return
+                pending = pending_for(which2.value or "theory")
+                pick_idx = item_select.value
+                with assumed_col:
+                    for i, (_cn, it) in enumerate(pending):
+                        if i == pick_idx:
+                            continue
+                        assumed_fields[it.name.lower()] = ui.number(
+                            f"Expected % on '{it.name}' (blank = use flat average)",
+                            value=None,
+                            min=0,
+                            max=100,
+                            step=0.5,
+                        ).props(FIELD).classes("w-full")
+
+            def compute() -> None:
                 result_box.clear()
                 pname = which2.value or "theory"
-                portion = c.theory if pname == "theory" else c.lab
+                pending = pending_for(pname)
                 with result_box:
-                    if portion is None:
-                        ui.label("Portion not available.").classes("text-rose-400")
-                        return
-                    pending = [
-                        (comp.name, it)
-                        for comp in portion.components
-                        for it in comp.items
-                        if not it.is_completed
-                    ]
                     if not pending:
-                        ui.label(
-                            "Nothing pending in this portion — it's fully graded."
-                        ).classes("cli-text")
+                        ui.label("Nothing pending in this portion — it's fully graded.").classes("cli-text")
+                        if c.is_complete():
+                            overall = c.overall_percent()
+                            fl, fgp = c.grade()
+                            ui.label(f"Your grade from saved marks: {overall:.2f}% → {fl} ({fgp:.2f})").classes(
+                                "text-sky-300 mt-2"
+                            )
                         return
-                    ui.label("Pending items:").classes("text-white")
-                    labels = {
-                        i: f"[{i}] {comp_name} > {it.name}  (out of {it.max_marks})"
-                        for i, (comp_name, it) in enumerate(pending)
+                    idx = int(item_select.value if item_select.value is not None else 0)
+                    if not (0 <= idx < len(pending)):
+                        ui.notify("Pick an upcoming item from the dropdown.", color="negative")
+                        return
+                    _, target_item = pending[idx]
+                    assumed = {
+                        k: float(f.value)
+                        for k, f in assumed_fields.items()
+                        if f.value is not None and f.value != ""
                     }
-                    pick = ui.select(
-                        labels, value=0, label="Which one are you about to take?"
-                    ).props(FIELD).classes("w-full")
-                    assume_toggle = ui.switch(
-                        "Assume specific scores on the OTHER pending items instead of the flat average?",
-                        value=False,
-                    ).props("color=primary")
-                    assumed_fields: Dict[str, ui.number] = {}
-                    assumed_col = ui.column().classes("w-full")
-
-                    def rebuild_assumed() -> None:
-                        assumed_col.clear()
-                        assumed_fields.clear()
-                        if not assume_toggle.value:
-                            return
-                        with assumed_col:
-                            for i, (_cn, it) in enumerate(pending):
-                                if i == pick.value:
-                                    continue
-                                assumed_fields[it.name.lower()] = ui.number(
-                                    f"Expected % on '{it.name}' (blank = use flat average)",
-                                    value=None,
-                                    min=0,
-                                    max=100,
-                                    step=0.5,
-                                ).props(FIELD).classes("w-full")
-
-                    assume_toggle.on_value_change(lambda _: rebuild_assumed())
-                    pick.on_value_change(lambda _: rebuild_assumed())
-                    rebuild_assumed()
-
-                    def compute() -> None:
-                        idx = int(pick.value if pick.value is not None else 0)
-                        if not (0 <= idx < len(pending)):
-                            ui.notify("Invalid choice.", color="negative")
-                            return
-                        _, target_item = pending[idx]
-                        assumed = {}
-                        for k, f in assumed_fields.items():
-                            if f.value is not None and f.value != "":
-                                assumed[k] = float(f.value)
-                        tgt = course_target(c, sem)
-                        needed_pct = c.required_for_item(
-                            pname,
-                            target_item.name,
-                            target_percent=tgt,
-                            assumed_scores=assumed,
-                        )
-                        if needed_pct is None:
-                            ui.notify(
-                                "Could not compute — check the item and try again.",
-                                color="negative",
-                            )
-                            return
-                        needed_marks = (needed_pct / 100) * target_item.max_marks
-                        ui.notify(
-                            f"To hit {tgt:.0f}% overall (with your assumptions on the rest):",
-                            color="info",
-                        )
+                    needed_pct = c.required_for_item(
+                        pname, target_item.name, target_percent=tgt, assumed_scores=assumed
+                    )
+                    if needed_pct is None:
+                        ui.notify("Could not compute — check the item and try again.", color="negative")
+                        return
+                    needed_marks = (needed_pct / 100) * target_item.max_marks
+                    with ui.element("div").classes("pace-box w-full"):
+                        ui.label(
+                            f"To hit {tgt:.0f}% overall (with your assumptions on the rest):"
+                        ).classes("text-white font-semibold")
                         if needed_pct > 100:
-                            ui.notify(
-                                f"you'd need {needed_pct:.2f}% on '{target_item.name}' — "
-                                "that's above 100%, not achievable here. "
-                                "You'll need a higher score elsewhere, or accept a lower grade in this course.",
-                                color="warning",
-                                timeout=8,
-                            )
+                            ui.label(
+                                f"you'd need {needed_pct:.2f}% on '{target_item.name}' — that's above 100%, not achievable here. "
+                                "You'll need a higher score elsewhere, or accept a lower grade in this course."
+                            ).classes("cli-text mt-1")
                         elif needed_pct < 0:
-                            ui.notify(
-                                f"'{target_item.name}' is already covered — you could score 0 here "
-                                "and still be on track.",
-                                color="positive",
-                                timeout=6,
-                            )
+                            ui.label(
+                                f"'{target_item.name}' is already covered — you could score 0 here and still be on track."
+                            ).classes("cli-text mt-1")
                         else:
-                            ui.notify(
-                                f"you need {needed_marks:.2f} / {target_item.max_marks} "
-                                f"({needed_pct:.2f}%) on '{target_item.name}'.",
-                                color="positive",
-                                timeout=8,
-                            )
+                            ui.label(
+                                f"you need {needed_marks:.2f} / {target_item.max_marks} ({needed_pct:.2f}%) on '{target_item.name}'."
+                            ).classes("text-sky-300 mt-1")
+                    ui.label(f"Current projected grade from saved marks: {letter} ({gp:.2f}) at {proj:.1f}%").classes(
+                        "cli-hint mt-2"
+                    )
 
-                    ui.button("Compute required score", on_click=compute).props(
-                        "color=secondary unelevated"
-                    ).classes("mt-2")
-
-            ui.button("Open calculator", on_click=run_what_if).props("outline color=primary")
-            run_what_if()
+            which2.on_value_change(lambda _: (fill_items(), rebuild_assumed()))
+            item_select.on_value_change(lambda _: rebuild_assumed())
+            assume_toggle.on_value_change(lambda _: rebuild_assumed())
+            fill_items()
+            ui.button("Calculate required score & grade", on_click=compute).props(
+                "color=primary unelevated"
+            ).classes("mt-3")
 
         course_panels()
 
@@ -1056,104 +1177,121 @@ def course_page(course_idx: int) -> None:
 @ui.page("/cgpa")
 def cgpa_page() -> None:
     apply_page_theme()
+    ensure_user_data()
     nav_bar()
 
     with ui.column().classes("w-full px-4 md:px-10 py-6 gap-4"):
         ui.button("← Back to Dashboard", on_click=lambda: ui.navigate.to("/dashboard")).props(
             "flat color=primary"
         )
-        ui.label("--- CGPA Module ---").classes("text-3xl font-bold text-white")
+        with ui.column().classes("w-full items-center text-center mb-2"):
+            ui.label("CGPA Module").classes("text-4xl md:text-5xl font-black dashboard-title")
+            ui.label("Track past semesters and watch your cumulative GPA grow.").classes("cli-hint mt-2")
 
         @ui.refreshable
-        def cgpa_panel() -> None:
-            with ui.card().classes("glass-card w-full p-5"):
-                ui.label("1) Add a past semester result manually").classes(
-                    "text-violet-300 font-semibold"
+        def history_panel() -> None:
+            ui.label("Semester history").classes("text-violet-300 font-semibold mb-2")
+            if not app_data.cgpa.semesters:
+                ui.label("No semester history yet. Add one below.").classes("cli-hint")
+                return
+            rows = [
+                {
+                    "name": s.name,
+                    "gpa": f"{s.sgpa:.3f}",
+                    "credits": s.credit_hours,
+                }
+                for s in app_data.cgpa.semesters
+            ]
+            ui.table(
+                columns=[
+                    {"name": "name", "label": "Semester", "field": "name", "align": "left"},
+                    {"name": "gpa", "label": "GPA", "field": "gpa", "align": "center"},
+                    {"name": "credits", "label": "Credit Hours", "field": "credits", "align": "center"},
+                ],
+                rows=rows,
+                row_key="name",
+            ).classes("w-full ascend-table").props("flat bordered separator=horizontal")
+            c = app_data.cgpa.cgpa()
+            if c is not None:
+                with ui.row().classes("w-full gap-4 mt-4 flex-wrap"):
+                    with ui.card().classes("glass-card p-4"):
+                        ui.label("CGPA").classes("text-gray-400 text-xs uppercase")
+                        ui.label(f"{c:.3f}").classes("text-3xl font-bold text-sky-300")
+                    with ui.card().classes("glass-card p-4"):
+                        ui.label("Equivalent percentage").classes("text-gray-400 text-xs uppercase")
+                        ui.label(f"{app_data.cgpa.percentage_equivalent():.2f}%").classes(
+                            "text-3xl font-bold text-violet-300"
+                        )
+
+        with ui.card().classes("glass-card w-full p-5"):
+            history_panel()
+
+        with ui.card().classes("glass-card w-full p-5"):
+            ui.label("1) Add a past semester result manually").classes("text-violet-300 font-semibold")
+            past_name = ui.input("Semester name").props(FIELD).classes("w-full")
+            past_sgpa = ui.number("GPA (out of 4.00)", value=3.0, min=0, max=4, step=0.01).props(
+                FIELD
+            ).classes("w-full")
+            past_ch = ui.number("Total credit hours that semester", value=15, min=1, step=0.5).props(
+                FIELD
+            ).classes("w-full")
+
+            def add_manual() -> None:
+                if not past_name.value:
+                    ui.notify("Semester name is required.", color="negative")
+                    return
+                app_data.cgpa.add(
+                    past_name.value, float(past_sgpa.value or 0), float(past_ch.value or 0)
                 )
-                past_name = ui.input("Semester name").props(FIELD).classes("w-full")
-                past_sgpa = ui.number("GPA (out of 4.00)", value=3.0, min=0, max=4, step=0.01).props(
-                    FIELD
-                ).classes("w-full")
-                past_ch = ui.number("Total credit hours that semester", value=15, min=1, step=0.5).props(
-                    FIELD
-                ).classes("w-full")
+                save_data()
+                ui.notify(f"Added {past_name.value}.", color="positive")
+                history_panel.refresh()
 
-                def add_manual() -> None:
-                    if not past_name.value:
-                        ui.notify("Semester name is required.", color="negative")
+            ui.button("Add manually", on_click=add_manual).props("color=primary unelevated")
+
+        with ui.card().classes("glass-card w-full p-5"):
+            ui.label("2) Pull in a tracked semester's GPA automatically").classes(
+                "text-violet-300 font-semibold"
+            )
+            if not app_data.semesters:
+                ui.label("No tracked semesters yet.").classes("cli-text")
+            else:
+                options = {}
+                for i, s in enumerate(app_data.semesters):
+                    val = s.actual_sgpa if s.finalized else s.sgpa_projected()
+                    tag = "final" if s.finalized else "projected"
+                    options[i] = f"[{i}] {s.name} — {tag} GPA: {val}"
+                pick = ui.select(options, value=0, label="Pick one").props(FIELD).classes("w-full")
+
+                def pull_tracked() -> None:
+                    idx = int(pick.value if pick.value is not None else 0)
+                    if not (0 <= idx < len(app_data.semesters)):
                         return
-                    app_data.cgpa.add(
-                        past_name.value, float(past_sgpa.value or 0), float(past_ch.value or 0)
-                    )
-                    save_data()
-                    ui.notify("Added.", color="positive")
-                    cgpa_panel.refresh()
-
-                ui.button("Add manually", on_click=add_manual).props("color=primary unelevated")
-
-            with ui.card().classes("glass-card w-full p-5"):
-                ui.label("2) Pull in a tracked semester's GPA automatically").classes(
-                    "text-violet-300 font-semibold"
-                )
-                if not app_data.semesters:
-                    ui.label("No tracked semesters yet.").classes("cli-text")
-                else:
-                    options = {}
-                    for i, s in enumerate(app_data.semesters):
-                        val = s.actual_sgpa if s.finalized else s.sgpa_projected()
-                        tag = "final" if s.finalized else "projected"
-                        options[i] = f"[{i}] {s.name} — {tag} GPA: {val}"
-                    pick = ui.select(options, value=0, label="Pick one").props(FIELD).classes("w-full")
-
-                    def pull_tracked() -> None:
-                        idx = int(pick.value if pick.value is not None else 0)
-                        if not (0 <= idx < len(app_data.semesters)):
-                            return
-                        s = app_data.semesters[idx]
-                        val = s.actual_sgpa if s.finalized else s.sgpa_projected()
-                        if val is None:
-                            ui.notify("No GPA available yet for that semester.", color="warning")
-                            return
-                        app_data.cgpa.add(s.name, val, s.total_credit_hours())
-                        save_data()
-                        ui.notify(f"Added {s.name} ({val:.3f}) to CGPA history.", color="positive")
-                        cgpa_panel.refresh()
-
-                    ui.button("Pull selected semester", on_click=pull_tracked).props(
-                        "color=primary unelevated"
-                    )
-
-            with ui.card().classes("glass-card w-full p-5"):
-                ui.label("3) View all semesters + CGPA").classes("text-violet-300 font-semibold")
-                if not app_data.cgpa.semesters:
-                    ui.label("No semester history yet.").classes("cli-text")
-                else:
-                    for s in app_data.cgpa.semesters:
-                        ui.label(
-                            f"  {s.name}: GPA {s.sgpa:.3f}, {s.credit_hours} credit hours"
-                        ).classes("cli-text")
-                    c = app_data.cgpa.cgpa()
-                    if c is not None:
-                        ui.label(f"\n  CGPA: {c:.3f}").classes("cli-text text-sky-300 mt-2")
-                        ui.label(
-                            f"  Equivalent percentage: {app_data.cgpa.percentage_equivalent():.2f}%"
-                        ).classes("cli-text")
-
-            with ui.card().classes("glass-card w-full p-5"):
-                ui.label("4) Remove a semester entry").classes("text-violet-300 font-semibold")
-                rem = ui.input("Semester name to remove").props(FIELD).classes("w-full")
-
-                def remove_entry() -> None:
-                    if not rem.value:
+                    s = app_data.semesters[idx]
+                    val = s.actual_sgpa if s.finalized else s.sgpa_projected()
+                    if val is None:
+                        ui.notify("No GPA available yet for that semester.", color="warning")
                         return
-                    app_data.cgpa.remove(rem.value)
+                    app_data.cgpa.add(s.name, val, s.total_credit_hours())
                     save_data()
-                    ui.notify(f"Removed '{rem.value}' (if it existed).", color="info")
-                    cgpa_panel.refresh()
+                    ui.notify(f"Added {s.name} ({val:.3f}) to CGPA history.", color="positive")
+                    history_panel.refresh()
 
-                ui.button("Remove", on_click=remove_entry).props("outline color=negative")
+                ui.button("Pull selected semester", on_click=pull_tracked).props("color=primary unelevated")
 
-        cgpa_panel()
+        with ui.card().classes("glass-card w-full p-5"):
+            ui.label("4) Remove a semester entry").classes("text-violet-300 font-semibold")
+            rem = ui.input("Semester name to remove").props(FIELD).classes("w-full")
+
+            def remove_entry() -> None:
+                if not rem.value:
+                    return
+                app_data.cgpa.remove(rem.value)
+                save_data()
+                ui.notify(f"Removed '{rem.value}' (if it existed).", color="info")
+                history_panel.refresh()
+
+            ui.button("Remove", on_click=remove_entry).props("outline color=negative")
 
 
 if __name__ in {"__main__", "__mp_main__"}:
