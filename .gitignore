@@ -1,0 +1,23 @@
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Environment variables / secrets
+.env
+
+# Data (contains generated/local app data)
+data/app_data.json
+
+# Editor/OS junk
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
