@@ -71,6 +71,12 @@ def ensure_semester() -> Semester:
     app_data.semesters.append(sem)
     app_data.active_semester_index = len(app_data.semesters) - 1
     save_data()
+    ui.notify(
+        "A default semester was created with target GPA 3.20. "
+        "Update the name and target below to match your actual semester.",
+        color="info",
+        timeout=8,
+    )
     return sem
 
 
@@ -661,8 +667,32 @@ def dashboard_page() -> None:
         with ui.card().classes("glass-card w-full p-4 mt-2"):
             ui.label("Active Semester").classes("text-violet-300 font-semibold")
             ui.label(
-                "One semester is active at a time. Update the details below or create your first semester."
+                "One semester is active at a time. Update the details below, switch to another, or create a new one."
             ).classes("cli-hint mb-3")
+
+            # --- Semester switcher (if multiple exist) ---
+            if len(app_data.semesters) > 1:
+                sem_options = {
+                    i: f"{s.name} (target GPA {s.target_sgpa:.2f})"
+                    for i, s in enumerate(app_data.semesters)
+                }
+                sem_picker = ui.select(
+                    sem_options,
+                    value=app_data.active_semester_index or 0,
+                    label="Switch active semester",
+                ).props(FIELD).classes("w-full")
+
+                def switch_semester() -> None:
+                    idx = int(sem_picker.value if sem_picker.value is not None else 0)
+                    if 0 <= idx < len(app_data.semesters):
+                        app_data.active_semester_index = idx
+                        save_data()
+                        ui.navigate.to("/dashboard")
+
+                ui.button("Switch to selected", on_click=switch_semester).props(
+                    "outline color=secondary size=sm"
+                ).classes("mb-3")
+
             with ui.column().classes("w-full gap-3"):
                 sem_name = ui.input("Semester name", value=sem.name).props(FIELD).classes("w-full")
                 sem_target = ui.number(
@@ -680,8 +710,6 @@ def dashboard_page() -> None:
                     active = ensure_semester()
                     active.name = sem_name.value
                     active.target_sgpa = float(sem_target.value or 3.2)
-                    app_data.semesters = [active]
-                    app_data.active_semester_index = 0
                     save_data()
                     ui.notify(
                         f"Semester '{active.name}' saved with target GPA {active.target_sgpa:.2f}.",
@@ -689,10 +717,73 @@ def dashboard_page() -> None:
                     )
                     ui.navigate.to("/dashboard")
 
-                ui.button("Save Semester", on_click=save_semester).props("color=primary unelevated")
+                def create_new_semester() -> None:
+                    new_name = sem_name.value or "New Semester"
+                    new_target = float(sem_target.value or 3.2)
+                    new_sem = Semester(name=new_name, target_sgpa=new_target)
+                    app_data.semesters.append(new_sem)
+                    app_data.active_semester_index = len(app_data.semesters) - 1
+                    save_data()
+                    ui.notify(
+                        f"New semester '{new_name}' created with target GPA {new_target:.2f}.",
+                        color="positive",
+                    )
+                    ui.navigate.to("/dashboard")
+
+                with ui.row().classes("gap-2"):
+                    ui.button("Save Semester", on_click=save_semester).props("color=primary unelevated")
+                    ui.button("Create New Semester", on_click=create_new_semester).props(
+                        "outline color=secondary"
+                    )
 
             with ui.expansion("Show grading scale", icon="menu_book").classes("w-full mt-4"):
                 show_grade_scale()
+
+        # --- Finalize Semester ---
+        with ui.card().classes("glass-card w-full p-4 mt-4"):
+            ui.label("Finalize Semester").classes("text-violet-300 font-semibold")
+            ui.label(
+                "Once all marks are entered and confirmed, finalize this semester to lock in the actual GPA. "
+                "This marks the semester as complete and records the real SGPA."
+            ).classes("cli-hint mb-3")
+
+            actual = sem.sgpa_actual()
+            all_complete = all(c.is_complete() for c in sem.courses) if sem.courses else False
+
+            if sem.finalized:
+                with ui.row().classes("items-center gap-3"):
+                    ui.icon("lock").classes("text-sky-300 text-xl")
+                    ui.label(
+                        f"This semester is finalized. Actual GPA: {sem.actual_sgpa:.3f}"
+                    ).classes("text-sky-300 font-semibold")
+            elif not sem.courses:
+                ui.label("Register courses first before finalizing.").classes("cli-hint")
+            elif not all_complete:
+                ui.label(
+                    "Not all courses are fully graded yet. Enter all remaining marks before finalizing."
+                ).classes("text-amber-400 text-sm")
+                if actual is not None:
+                    ui.label(
+                        f"Partial actual GPA (completed courses only): {actual:.3f}"
+                    ).classes("cli-hint mt-1")
+            else:
+                ui.label(
+                    f"All courses are fully graded. Actual GPA: {actual:.3f}"
+                ).classes("text-sky-300 font-semibold")
+
+                def finalize_sem() -> None:
+                    sem.finalized = True
+                    sem.actual_sgpa = sem.sgpa_actual()
+                    save_data()
+                    ui.notify(
+                        f"Semester '{sem.name}' finalized with GPA {sem.actual_sgpa:.3f}.",
+                        color="positive",
+                    )
+                    ui.navigate.to("/dashboard")
+
+                ui.button("Finalize & Lock In", on_click=finalize_sem).props(
+                    "color=positive unelevated"
+                ).classes("mt-2")
 
         semester_overview()
         ui.separator().classes("bg-violet-400/20 my-6")
@@ -1368,7 +1459,7 @@ def cgpa_page() -> None:
                 ui.button("Pull selected semester", on_click=pull_tracked).props("color=primary unelevated")
 
         with ui.card().classes("glass-card w-full p-5"):
-            ui.label("4) Remove a semester entry").classes("text-violet-300 font-semibold")
+            ui.label("3) Remove a semester entry").classes("text-violet-300 font-semibold")
             rem = ui.input("Semester name to remove").props(FIELD).classes("w-full")
 
             def remove_entry() -> None:

@@ -11,8 +11,9 @@ env/
 # Environment variables / secrets
 .env
 
-# Data (contains generated/local app data)
+# Data (contains generated/local app data — never commit personal marks)
 data/app_data.json
+data/users/
 
 # Editor/OS junk
 .vscode/
