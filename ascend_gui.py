@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import random
 from typing import Dict, List, Optional, Tuple
 
 from nicegui import app, ui
@@ -306,6 +307,46 @@ def apply_page_theme() -> None:
         color: #7dd3fc;
         font-weight: 600;
     }
+    .cat-buddy {
+        position: fixed;
+        top: 88px;
+        right: 18px;
+        z-index: 3000;
+        max-width: 250px;
+        pointer-events: none;
+        overflow: visible;
+        padding-top: 2px;
+    }
+    .cat-bubble {
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(167, 139, 250, 0.55);
+        border-radius: 12px;
+        padding: 12px 14px;
+        box-shadow: 0 8px 28px rgba(124, 58, 237, 0.25);
+        margin: 0 0 8px 0;
+        min-width: 200px;
+        max-width: 240px;
+        box-sizing: border-box;
+        overflow: visible;
+        animation: buddyFade 0.45s ease;
+    }
+    .cat-face {
+        width: 118px;
+        height: auto;
+        margin-left: auto;
+        display: block;
+        filter: drop-shadow(0 0 14px rgba(167, 139, 250, 0.45));
+        animation: catBob 2.8s ease-in-out infinite;
+        pointer-events: none;
+    }
+    @keyframes catBob {
+        0%, 100% { transform: translateY(0) rotate(-2deg); }
+        50% { transform: translateY(-6px) rotate(2deg); }
+    }
+    @keyframes buddyFade {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
 </style>
 """
     )
@@ -320,6 +361,39 @@ def nav_bar() -> None:
                 ui.button("Sign Up", on_click=lambda: ui.navigate.to("/signup")).props("outline color=primary")
                 ui.button("Dashboard", on_click=lambda: ui.navigate.to("/dashboard")).props("color=primary unelevated")
                 ui.button("CGPA", on_click=lambda: ui.navigate.to("/cgpa")).props("outline color=secondary")
+
+
+MOTIVATION_QUOTES = [
+    "Small steps every day still climb the whole mountain.",
+    "You're not behind — you're building momentum.",
+    "One quiz at a time. You've got this.",
+    "Consistency beats cramming. Stay with Ascend.",
+    "Your future self is cheering for today's effort.",
+    "Progress > perfection. Keep going.",
+    "Tough weeks don't erase strong semesters.",
+    "Breathe. Plan. Execute. Ascend.",
+    "Marks are data — not your worth. Use them wisely.",
+    "Show up for yourself today. That's enough.",
+]
+
+
+def motivation_buddy() -> None:
+    """Corner cat helper with rotating motivational quotes (not used on landing)."""
+    quote_label = None
+
+    with ui.element("div").classes("cat-buddy"):
+        with ui.element("div").classes("cat-bubble"):
+            ui.label("Ascend Cat").classes("text-[10px] uppercase tracking-widest text-violet-300")
+            quote_label = ui.label(random.choice(MOTIVATION_QUOTES)).classes(
+                "text-sm text-gray-100 leading-snug mt-1"
+            )
+        ui.image("/assets/ascend_cat.svg").classes("cat-face")
+
+    def rotate_quote() -> None:
+        if quote_label is not None:
+            quote_label.set_text(random.choice(MOTIVATION_QUOTES))
+
+    ui.timer(18.0, rotate_quote)
 
 
 def footer_note() -> None:
@@ -425,6 +499,7 @@ def auth_card(title: str, subtitle: str, primary_label: str, primary_action) -> 
 @ui.page("/login")
 def login_page() -> None:
     apply_page_theme()
+    motivation_buddy()
 
     def do_login(email: str, password: str, _unused: Optional[str]) -> None:
         if not email or not password:
@@ -441,6 +516,7 @@ def login_page() -> None:
 @ui.page("/signup")
 def signup_page() -> None:
     apply_page_theme()
+    motivation_buddy()
 
     def do_signup(email: str, password: str, confirm: Optional[str]) -> None:
         if not email or not password:
@@ -529,13 +605,19 @@ def courses_grid() -> None:
                     "flat round dense color=negative size=sm"
                 ).classes("absolute top-2 right-2 z-10").tooltip("Remove course")
 
-                with ui.column().classes("w-full cursor-pointer pr-6").on(
+                with ui.column().classes("w-full cursor-pointer pr-8").on(
                     "click", lambda i=idx: ui.navigate.to(f"/course/{i}")
                 ):
-                    ui.label(f"[{idx}] {course.name}").classes("text-lg text-white font-semibold")
-                    ui.label(f"{course.credit_hours} cr, {tgt_txt}").classes("text-sm text-gray-400")
-                    ui.label(f"projected: {letter} ({gp:.2f})").classes("text-sm text-sky-300 mt-2")
-                    ui.label("Click to enter marks / view required-marks report →").classes(
+                    with ui.row().classes("items-center gap-2 mb-1"):
+                        ui.label(f"Course {idx + 1}").classes(
+                            "text-[10px] uppercase tracking-[0.2em] text-violet-300 font-semibold"
+                        )
+                    ui.label(course.name).classes("text-xl text-white font-bold leading-tight")
+                    ui.label(f"{course.credit_hours} credit hours · {tgt_txt}").classes(
+                        "text-sm text-gray-400 mt-1"
+                    )
+                    ui.label(f"Projected: {letter} ({gp:.2f})").classes("text-sm text-sky-300 mt-2")
+                    ui.label("Open marks & required report →").classes(
                         "text-xs text-violet-300 mt-3"
                     )
 
@@ -565,6 +647,7 @@ def dashboard_page() -> None:
     apply_page_theme()
     ensure_user_data()
     nav_bar()
+    motivation_buddy()
     sem = ensure_semester()
 
     with ui.column().classes("w-full px-4 md:px-10 py-6"):
@@ -785,6 +868,7 @@ def course_page(course_idx: int) -> None:
     apply_page_theme()
     ensure_user_data()
     nav_bar()
+    motivation_buddy()
     sem = ensure_semester()
 
     if course_idx < 0 or course_idx >= len(sem.courses):
@@ -801,7 +885,10 @@ def course_page(course_idx: int) -> None:
         ui.button("← Back to Dashboard", on_click=lambda: ui.navigate.to("/dashboard")).props(
             "flat color=primary"
         )
-        ui.label(f"Course: {course.name}").classes("text-3xl font-bold text-white")
+        ui.label(f"Course {course_idx + 1}").classes(
+            "text-xs uppercase tracking-[0.25em] text-violet-300 font-semibold"
+        )
+        ui.label(course.name).classes("text-3xl font-bold text-white")
         ui.label(
             f"{course.credit_hours} credit hours"
             + (" • has lab" if course.has_lab else " • theory only")
@@ -1179,6 +1266,7 @@ def cgpa_page() -> None:
     apply_page_theme()
     ensure_user_data()
     nav_bar()
+    motivation_buddy()
 
     with ui.column().classes("w-full px-4 md:px-10 py-6 gap-4"):
         ui.button("← Back to Dashboard", on_click=lambda: ui.navigate.to("/dashboard")).props(
@@ -1260,7 +1348,7 @@ def cgpa_page() -> None:
                 for i, s in enumerate(app_data.semesters):
                     val = s.actual_sgpa if s.finalized else s.sgpa_projected()
                     tag = "final" if s.finalized else "projected"
-                    options[i] = f"[{i}] {s.name} — {tag} GPA: {val}"
+                    options[i] = f"{i + 1}. {s.name} — {tag} GPA: {val}"
                 pick = ui.select(options, value=0, label="Pick one").props(FIELD).classes("w-full")
 
                 def pull_tracked() -> None:
@@ -1295,6 +1383,7 @@ def cgpa_page() -> None:
 
 
 if __name__ in {"__main__", "__mp_main__"}:
+    app.add_static_files("/assets", "assets")
     ui.run(
         title="Ascend",
         dark=True,
