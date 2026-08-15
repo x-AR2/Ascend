@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="25 6 170 170" width="512" height="512" role="img" aria-label="Friendly Ascend cat">
+  <!-- ledge -->
+  <rect x="0" y="118" width="220" height="32" fill="#0b1220"/>
+  <rect x="0" y="118" width="220" height="4" fill="#e5e7eb"/>
+
+  <!-- left paw (friendly wave) -->
+  <ellipse cx="58" cy="118" rx="22" ry="14" fill="#111"/>
+  <ellipse cx="48" cy="112" rx="5" ry="7" fill="#111"/>
+  <ellipse cx="58" cy="110" rx="5" ry="7" fill="#111"/>
+  <ellipse cx="68" cy="112" rx="5" ry="7" fill="#111"/>
+  <ellipse cx="48" cy="112" rx="2.2" ry="3" fill="#f8fafc"/>
+  <ellipse cx="58" cy="110" rx="2.2" ry="3" fill="#f8fafc"/>
+  <ellipse cx="68" cy="112" rx="2.2" ry="3" fill="#f8fafc"/>
+
+  <!-- right paw -->
+  <ellipse cx="162" cy="118" rx="22" ry="14" fill="#111"/>
+  <ellipse cx="152" cy="112" rx="5" ry="7" fill="#111"/>
+  <ellipse cx="162" cy="110" rx="5" ry="7" fill="#111"/>
+  <ellipse cx="172" cy="112" rx="5" ry="7" fill="#111"/>
+  <ellipse cx="152" cy="112" rx="2.2" ry="3" fill="#f8fafc"/>
+  <ellipse cx="162" cy="110" rx="2.2" ry="3" fill="#f8fafc"/>
+  <ellipse cx="172" cy="112" rx="2.2" ry="3" fill="#f8fafc"/>
+
+  <!-- head -->
+  <path d="M55 118
+           C52 70, 70 28, 110 26
+           C150 28, 168 70, 165 118
+           Z" fill="#111"/>
+
+  <!-- ears -->
+  <path d="M68 58 L78 18 L98 48 Z" fill="#111"/>
+  <path d="M152 58 L142 18 L122 48 Z" fill="#111"/>
+  <path d="M74 52 L80 28 L92 46 Z" fill="#f472b6" opacity="0.85"/>
+  <path d="M146 52 L140 28 L128 46 Z" fill="#f472b6" opacity="0.85"/>
+
+  <!-- white face patch -->
+  <ellipse cx="110" cy="88" rx="42" ry="36" fill="#f8fafc"/>
+
+  <!-- eyes -->
+  <circle cx="93" cy="82" r="13" fill="#111"/>
+  <circle cx="127" cy="82" r="13" fill="#111"/>
+  <circle cx="97" cy="78" r="4" fill="#fff"/>
+  <circle cx="131" cy="78" r="4" fill="#fff"/>
+  <circle cx="90" cy="86" r="1.6" fill="#fff" opacity="0.7"/>
+  <circle cx="124" cy="86" r="1.6" fill="#fff" opacity="0.7"/>
+
+  <!-- nose + mouth (friendly) -->
+  <path d="M110 94 L104 100 L116 100 Z" fill="#111"/>
+  <path d="M110 100 Q100 108 92 104" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M110 100 Q120 108 128 104" fill="none" stroke="#111" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- whiskers -->
+  <path d="M78 96 H58" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
+  <path d="M80 102 H56" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
+  <path d="M142 96 H162" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
+  <path d="M140 102 H164" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
+</svg>

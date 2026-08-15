@@ -237,8 +237,11 @@ def apply_page_theme() -> None:
     )
     ui.add_head_html(
         """
-<link rel="icon" type="image/png" href="/assets/favicon.png">
-<link rel="shortcut icon" href="/assets/favicon.ico">
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg?v=2">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon.png?v=2">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon.png?v=2">
+<link rel="apple-touch-icon" href="/assets/favicon.png?v=2">
+<link rel="shortcut icon" href="/assets/favicon.ico?v=2">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vanta@latest/dist/vanta.net.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
@@ -594,7 +597,7 @@ def nav_bar() -> None:
     with ui.header().classes("bg-[#02040acc] backdrop-blur-md border-b border-[#800020]"):
         with ui.row().classes("w-full items-center justify-between px-4 md:px-8 py-2"):
             with ui.link(target="/").classes("flex items-center gap-2 no-underline"):
-                ui.image("/assets/favicon.png").classes("w-6 h-6 rounded-sm shadow-sm")
+                ui.image("/assets/favicon.png?v=2").classes("w-6 h-6 rounded-sm shadow-sm")
                 ui.label("A S C E N D").classes("text-white font-bold tracking-[0.35em] text-sm hover:text-gray-300 transition-colors")
             with ui.row().classes("items-center gap-2"):
                 ui.button("Login", on_click=lambda: ui.navigate.to("/login")).props("flat color=white")
