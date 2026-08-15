@@ -23,6 +23,13 @@ LETTER_OPTIONS = ["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D"]
 FIELD = "outlined dark color=primary stack-label"
 
 
+def notify_toast(message: str, color: str = 'info', **kwargs) -> None:
+    if color == 'custom':
+        ui.notify(message, position='top', classes='custom-toast', **kwargs)
+    else:
+        ui.notify(message, color=color, position='top', **kwargs)
+
+
 def user_data_path() -> str:
     email = app.storage.user.get("auth_email")
     if not email:
@@ -71,7 +78,7 @@ def ensure_semester() -> Semester:
     app_data.semesters.append(sem)
     app_data.active_semester_index = len(app_data.semesters) - 1
     save_data()
-    ui.notify(
+    notify_toast(
         "A default semester was created with target GPA 3.20. "
         "Update the name and target below to match your actual semester.",
         color="info",
@@ -104,7 +111,7 @@ def render_required_report(course: Course, sem: Semester) -> None:
         ).classes("cli-hint mb-3")
 
     with ui.row().classes("w-full items-center justify-between flex-wrap gap-2 mb-4"):
-        ui.label(f"Required Marks Report — {course.name}").classes("text-violet-300 font-semibold text-lg")
+        ui.label(f"Required Marks Report — {course.name}").classes("text-white font-semibold text-lg")
         ui.label(f"Target: {target:.0f}%").classes("grade-chip")
 
     try:
@@ -119,7 +126,7 @@ def render_required_report(course: Course, sem: Semester) -> None:
         p = report[portion_key]
 
         with ui.card().classes("glass-card w-full p-4 mt-3"):
-            ui.label(portion_key.upper()).classes("text-sky-300 font-bold tracking-wider text-sm mb-2")
+            ui.label(portion_key.upper()).classes("text-white font-bold tracking-wider text-sm mb-2")
 
             if p.get("status") == "complete":
                 locked = p.get("actual_percent")
@@ -148,7 +155,7 @@ def render_required_report(course: Course, sem: Semester) -> None:
                         with ui.column().classes("min-w-40"):
                             ui.label("Need on remaining").classes("text-gray-400 text-xs uppercase")
                             ui.label(f"{req:.2f}% avg").classes(
-                                "text-sky-300 font-semibold"
+                                "text-white font-semibold"
                                 if p.get("achievable", True)
                                 else "text-rose-400 font-semibold"
                             )
@@ -200,18 +207,18 @@ def render_required_report(course: Course, sem: Semester) -> None:
                 ).classes("w-full ascend-table mt-3").props("flat bordered dense separator=horizontal")
 
     with ui.card().classes("glass-card w-full p-4 mt-4"):
-        ui.label("Course summary").classes("text-violet-300 font-semibold mb-2")
+        ui.label("Course summary").classes("text-white font-semibold mb-2")
         if course.is_complete():
             overall = course.overall_percent()
             letter, gp = course.grade()
-            ui.label(f"Locked-in: {overall:.2f}% → {letter} ({gp:.2f})").classes("text-sky-300")
+            ui.label(f"Locked-in: {overall:.2f}% → {letter} ({gp:.2f})").classes("text-white")
             ui.label(
                 "Target grade achieved." if overall >= target - 1e-9 else f"Below target of {target:.0f}%."
             ).classes("cli-text mt-1")
         else:
             proj = course.projected_percent()
             letter, gp = percentage_to_grade(proj)
-            ui.label(f"Projected from saved marks: {proj:.1f}% → {letter} ({gp:.2f})").classes("text-sky-300")
+            ui.label(f"Projected from saved marks: {proj:.1f}% → {letter} ({gp:.2f})").classes("text-white")
             best = course.best_case_percent()
             bletter, bgp = percentage_to_grade(best)
             ui.label(f"Best case if you ace the rest: {best:.1f}% → {bletter} ({bgp:.2f})").classes("cli-hint mt-1")
@@ -219,47 +226,178 @@ def render_required_report(course: Course, sem: Semester) -> None:
 
 def apply_page_theme() -> None:
     ui.colors(
-        primary="#7c3aed",
-        secondary="#2563eb",
-        accent="#a78bfa",
+        primary="#800020",
+        secondary="#4a0012",
+        accent="#9e0028",
         dark="#02040a",
-        positive="#38bdf8",
+        positive="#9e0028",
         negative="#f43f5e",
         warning="#f59e0b",
-        info="#60a5fa",
+        info="#9e0028",
     )
     ui.add_head_html(
         """
+<link rel="icon" type="image/png" href="/assets/favicon.png">
+<link rel="shortcut icon" href="/assets/favicon.ico">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vanta@latest/dist/vanta.net.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script>
+window.animateGPA = function(id, startVal, endVal) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const start = parseFloat(startVal);
+    const end = parseFloat(endVal);
+    if (isNaN(start) || isNaN(end)) {
+        el.innerText = endVal;
+        return;
+    }
+    if (Math.abs(start - end) < 0.001) {
+        el.innerText = end.toFixed(3);
+        return;
+    }
+    const duration = 1200; // ms
+    const startTime = performance.now();
+    function update(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const ease = 1 - Math.pow(1 - progress, 3); // Ease out cubic
+        const current = start + (end - start) * ease;
+        el.innerText = current.toFixed(3);
+        if (progress < 1) {
+            requestAnimationFrame(update);
+        }
+    }
+    requestAnimationFrame(update);
+};
+
+window.initMaskedHeading = function() {
+    const root = document.getElementById('ascend-masked-title');
+    if (!root) return;
+    if (root._cleanupMaskedHeading) {
+        root._cleanupMaskedHeading();
+    }
+    const media = root.querySelector('.masked-heading__media');
+    const measure = root.querySelector('.masked-heading__measure');
+    const word = root.querySelector('.masked-heading__word');
+    const base = root.querySelector('.masked-heading__baseline');
+    const glyph = root.querySelector('.masked-heading__glyph');
+    const reveal = root.querySelector('.masked-heading__reveal');
+    if (!media || !measure || !word || !base || !glyph || !reveal) return;
+
+    const fillScale = 1.3;
+    const parallax = 34;
+    const drift = 18;
+    const textScale = 0.22;
+
+    function sync() {
+        const W = root.clientWidth;
+        const fontSize = Math.max(Math.min(W * textScale, 220), 36);
+        root.style.fontSize = fontSize + 'px';
+        root.style.height = (fontSize * 1.3) + 'px';
+        
+        glyph.setAttribute('x', word.offsetLeft);
+        glyph.setAttribute('y', base.offsetTop);
+        const cs = window.getComputedStyle(measure);
+        glyph.style.fontFamily = cs.fontFamily;
+        glyph.style.fontSize = cs.fontSize;
+        glyph.style.fontWeight = cs.fontWeight;
+        glyph.style.letterSpacing = cs.letterSpacing;
+    }
+
+    sync();
+    window.addEventListener('resize', sync);
+
+    let off = { x: 0, y: 0, tx: 0, ty: 0 };
+    let clock = 0;
+    let last = performance.now();
+    let raf = 0;
+
+    function frame(now) {
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        clock += dt;
+
+        const dx = Math.sin(clock * 0.21) * drift;
+        const dy = Math.cos(clock * 0.17) * drift * 0.6;
+
+        const ease = 1 - Math.exp(-dt / 0.18);
+        off.x += (off.tx + dx - off.x) * ease;
+        off.y += (off.ty + dy - off.y) * ease;
+
+        const W = root.clientWidth;
+        const H = root.clientHeight;
+        const maxX = Math.max(0, ((fillScale - 1) / 2) * W);
+        const maxY = Math.max(0, ((fillScale - 1) / 2) * H);
+
+        const cx = Math.max(-maxX, Math.min(off.x, maxX));
+        const cy = Math.max(-maxY, Math.min(off.y, maxY));
+
+        media.style.transform = `translate3d(${cx.toFixed(2)}px, ${cy.toFixed(2)}px, 0) scale(${fillScale})`;
+        raf = requestAnimationFrame(frame);
+    }
+    
+    raf = requestAnimationFrame(frame);
+
+    function onMove(e) {
+        const r = root.getBoundingClientRect();
+        const nx = ((e.clientX - r.left) / (r.width || 1)) * 2 - 1;
+        const ny = ((e.clientY - r.top) / (r.height || 1)) * 2 - 1;
+        off.tx = Math.max(-1, Math.min(nx, 1)) * -parallax;
+        off.ty = Math.max(-1, Math.min(ny, 1)) * -parallax;
+    }
+
+    function onLeave() {
+        off.tx = 0;
+        off.ty = 0;
+    }
+
+    root.addEventListener('pointermove', onMove);
+    root.addEventListener('pointerleave', onLeave);
+
+    if (window.gsap) {
+        gsap.set(reveal, { opacity: 1 });
+        gsap.set(reveal, { clipPath: 'inset(0% 100% 0% 0%)' });
+        const state = { p: 100 };
+        gsap.to(state, {
+            p: 0,
+            duration: 1.5,
+            ease: 'power3.inOut',
+            onUpdate: () => {
+                reveal.style.clipPath = `inset(0% ${state.p}% 0% 0%)`;
+            }
+        });
+    } else {
+        reveal.style.opacity = 1;
+    }
+
+    root._cleanupMaskedHeading = function() {
+        cancelAnimationFrame(raf);
+        window.removeEventListener('resize', sync);
+        root.removeEventListener('pointermove', onMove);
+        root.removeEventListener('pointerleave', onLeave);
+    };
+};
+</script>
 <style>
     body {
-        background: radial-gradient(circle at 25% 15%, #0a0f1f 0%, #02040a 42%, #000000 100%);
+        background: #050505;
         color: #e5e7eb;
         font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
     }
     .ascend-title {
-        background: linear-gradient(90deg, #60a5fa, #a78bfa, #c084fc, #38bdf8, #60a5fa);
-        background-size: 220% auto;
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        animation: ascendShimmer 4.5s linear infinite, ascendFloat 3.2s ease-in-out infinite;
-        text-shadow: 0 0 22px rgba(96, 165, 250, 0.35), 0 0 42px rgba(167, 139, 250, 0.28);
+        color: #ffffff;
         letter-spacing: 0.22em;
-    }
-    @keyframes ascendShimmer {
-        0% { background-position: 0% center; }
-        100% { background-position: 220% center; }
+        text-shadow: 2px 2px 0px #a50029;
     }
     @keyframes ascendFloat {
-        0%, 100% { transform: translateY(0); filter: drop-shadow(0 0 10px rgba(96,165,250,.35)); }
-        50% { transform: translateY(-8px); filter: drop-shadow(0 0 22px rgba(168,85,247,.45)); }
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-8px); }
     }
     .glass-card {
         backdrop-filter: blur(12px);
-        background: rgba(8, 12, 24, 0.78);
-        border: 1px solid rgba(139, 92, 246, 0.28);
+        background: rgba(15, 15, 20, 0.9);
+        border: 1px solid rgba(214, 26, 60, 0.8);
         border-radius: 16px;
     }
     .hero-shell {
@@ -275,19 +413,15 @@ def apply_page_theme() -> None:
     }
     .feature-card:hover, .course-card:hover {
         transform: translateY(-4px);
-        border-color: rgba(96, 165, 250, 0.55);
-        box-shadow: 0 0 24px rgba(124, 58, 237, 0.22);
+        border-color: #d61a3c;
+        box-shadow: 0 0 24px rgba(214, 26, 60, 0.6);
     }
     .cli-hint { color: #9ca3af; font-size: 0.9rem; line-height: 1.45; }
     .cli-text { color: #d1d5db; white-space: pre-wrap; line-height: 1.55; }
     .dashboard-title {
-        background: linear-gradient(90deg, #93c5fd, #c4b5fd, #a5b4fc, #93c5fd);
-        background-size: 200% auto;
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        animation: ascendShimmer 5s linear infinite;
+        color: #ffffff;
         letter-spacing: 0.12em;
+        text-shadow: 1px 1px 0px #a50029;
     }
     .ascend-table .q-table__top,
     .ascend-table thead tr:first-child th {
@@ -295,11 +429,11 @@ def apply_page_theme() -> None:
         color: #e5e7eb;
     }
     .ascend-table tbody tr:hover td {
-        background: rgba(124, 58, 237, 0.12);
+        background: rgba(214, 26, 60, 0.15);
     }
     .pace-box {
-        background: rgba(30, 41, 59, 0.65);
-        border-left: 3px solid #7c3aed;
+        background: rgba(20, 20, 25, 0.85);
+        border-left: 4px solid #d61a3c;
         padding: 12px 16px;
         border-radius: 8px;
         margin: 8px 0;
@@ -308,10 +442,40 @@ def apply_page_theme() -> None:
         display: inline-block;
         padding: 4px 12px;
         border-radius: 999px;
-        background: rgba(56, 189, 248, 0.15);
-        border: 1px solid rgba(56, 189, 248, 0.35);
-        color: #7dd3fc;
+        background: rgba(214, 26, 60, 0.7);
+        border: 1px solid #d61a3c;
+        color: #ffffff;
         font-weight: 600;
+    }
+    /* All Outline buttons styling - prominent white text and clear borders */
+    .q-btn--outline {
+        border: 1.5px solid #d61a3c !important;
+    }
+    .q-btn--outline .q-btn__content,
+    .q-btn--outline .q-btn__content span,
+    .q-btn--outline .q-icon {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+    }
+    .q-btn--outline:hover {
+        background: rgba(214, 26, 60, 0.25) !important;
+        border-color: #ff2d55 !important;
+    }
+    /* Ensure all input fields & message fields display clearly */
+    .q-field--outlined .q-field__control {
+        background: rgba(15, 15, 25, 0.85) !important;
+        border-color: rgba(214, 26, 60, 0.6) !important;
+    }
+    .q-field--outlined .q-field__control:hover {
+        border-color: #d61a3c !important;
+    }
+    .q-field--dark .q-field__label {
+        color: #e2e8f0 !important;
+        font-weight: 500 !important;
+    }
+    .q-field--dark .q-field__native, 
+    .q-field--dark .q-field__input {
+        color: #ffffff !important;
     }
     .cat-buddy {
         position: fixed;
@@ -325,10 +489,10 @@ def apply_page_theme() -> None:
     }
     .cat-bubble {
         background: rgba(15, 23, 42, 0.95);
-        border: 1px solid rgba(167, 139, 250, 0.55);
+        border: 1px solid #a50029;
         border-radius: 12px;
         padding: 12px 14px;
-        box-shadow: 0 8px 28px rgba(124, 58, 237, 0.25);
+        box-shadow: 0 8px 28px rgba(214, 26, 60, 0.5);
         margin: 0 0 8px 0;
         min-width: 200px;
         max-width: 240px;
@@ -341,7 +505,7 @@ def apply_page_theme() -> None:
         height: auto;
         margin-left: auto;
         display: block;
-        filter: drop-shadow(0 0 14px rgba(167, 139, 250, 0.45));
+        filter: drop-shadow(0 0 14px rgba(214, 26, 60, 0.7));
         animation: catBob 2.8s ease-in-out infinite;
         pointer-events: none;
     }
@@ -353,15 +517,85 @@ def apply_page_theme() -> None:
         from { opacity: 0; transform: translateY(6px); }
         to { opacity: 1; transform: translateY(0); }
     }
+    .custom-toast {
+        background: rgba(15, 15, 20, 0.95) !important;
+        border: 1px solid #d61a3c !important;
+        color: #fff !important;
+        font-weight: 500 !important;
+        backdrop-filter: blur(8px) !important;
+        box-shadow: 0 4px 16px rgba(214, 26, 60, 0.3) !important;
+    }
+    .custom-toast .q-notification__icon {
+        display: none !important;
+    }
+    
+    /* Masked Heading Styles */
+    .masked-heading {
+      position: relative;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      text-wrap: balance;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      display: inline-block;
+    }
+    .masked-heading__measure {
+      color: transparent;
+      user-select: none;
+      pointer-events: none;
+    }
+    .masked-heading__word {
+      display: inline-block;
+      white-space: pre;
+    }
+    .masked-heading__baseline {
+      display: inline-block;
+      width: 0;
+      height: 0;
+    }
+    .masked-heading__defs {
+      position: absolute;
+      width: 0;
+      height: 0;
+      overflow: hidden;
+    }
+    .masked-heading__reveal {
+      position: absolute;
+      inset: 0;
+      display: block;
+      pointer-events: none;
+    }
+    .masked-heading__clip {
+      position: absolute;
+      inset: 0;
+      display: block;
+    }
+    .masked-heading__media {
+      position: absolute;
+      inset: 0;
+      display: block;
+      will-change: transform, filter;
+    }
+    .masked-heading__source {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
 </style>
 """
     )
 
 
 def nav_bar() -> None:
-    with ui.header().classes("bg-[#02040acc] backdrop-blur-md border-b border-violet-400/25"):
+    with ui.header().classes("bg-[#02040acc] backdrop-blur-md border-b border-[#800020]"):
         with ui.row().classes("w-full items-center justify-between px-4 md:px-8 py-2"):
-            ui.label("A S C E N D").classes("text-sky-300 font-bold tracking-[0.35em] text-sm")
+            with ui.link(target="/").classes("flex items-center gap-2 no-underline"):
+                ui.image("/assets/favicon.png").classes("w-6 h-6 rounded-sm shadow-sm")
+                ui.label("A S C E N D").classes("text-white font-bold tracking-[0.35em] text-sm hover:text-gray-300 transition-colors")
             with ui.row().classes("items-center gap-2"):
                 ui.button("Login", on_click=lambda: ui.navigate.to("/login")).props("flat color=white")
                 ui.button("Sign Up", on_click=lambda: ui.navigate.to("/signup")).props("outline color=primary")
@@ -389,7 +623,7 @@ def motivation_buddy() -> None:
 
     with ui.element("div").classes("cat-buddy"):
         with ui.element("div").classes("cat-bubble"):
-            ui.label("Ascend Cat").classes("text-[10px] uppercase tracking-widest text-violet-300")
+            ui.label("Ascend Cat").classes("text-[10px] uppercase tracking-widest text-white")
             quote_label = ui.label(random.choice(MOTIVATION_QUOTES)).classes(
                 "text-sm text-gray-100 leading-snug mt-1"
             )
@@ -417,9 +651,32 @@ def landing_page() -> None:
     with ui.element("div").classes("hero-shell w-full"):
         ui.html('<div id="hero-bg"></div>', sanitize=False)
         with ui.column().classes("hero-content w-full items-center justify-center pt-24 pb-16 px-6"):
-            ui.label("ASCEND").classes("text-6xl md:text-8xl font-black ascend-title")
+            ui.html('''
+            <div class="masked-heading-container w-full flex justify-center py-4">
+              <h1 id="ascend-masked-title" class="masked-heading text-6xl md:text-8xl font-black text-center" style="max-width: 1000px; font-family: 'Segoe UI', sans-serif;">
+                <span class="masked-heading__measure">
+                  <span class="masked-heading__word">ASCEND<i class="masked-heading__baseline"></i></span>
+                </span>
+                <svg class="masked-heading__defs" aria-hidden="true" focusable="false">
+                  <defs>
+                    <clipPath id="mh-ascend-clip" clipPathUnits="userSpaceOnUse">
+                      <text class="masked-heading__glyph">ASCEND</text>
+                    </clipPath>
+                  </defs>
+                </svg>
+                <span class="masked-heading__reveal" style="opacity: 0;">
+                  <span class="masked-heading__clip" style="clip-path: url(#mh-ascend-clip);">
+                    <span class="masked-heading__media" style="transform: scale(1.3); filter: drop-shadow(0 0 35px rgba(255, 255, 255, 0.45));">
+                      <img class="masked-heading__source" src="/assets/masked_bg.jpg?v=3" draggable="false" />
+                    </span>
+                  </span>
+                </span>
+              </h1>
+            </div>
+            ''', sanitize=False)
+            ui.run_javascript("setTimeout(window.initMaskedHeading, 150);")
             ui.label("Plan smarter. Track deeper. Finish stronger.").classes(
-                "mt-4 text-lg md:text-xl text-sky-300 font-medium"
+                "mt-4 text-lg md:text-xl text-white font-medium"
             )
             ui.label(
                 "A dark-mode GPA companion that helps you register courses, track marks, and stay on pace "
@@ -433,23 +690,23 @@ def landing_page() -> None:
                     "outline color=secondary size=lg"
                 )
 
-            ui.separator().classes("w-full max-w-5xl mt-14 mb-8 bg-violet-400/20")
+            ui.separator().classes("w-full max-w-5xl mt-14 mb-8 bg-[#800020]/25")
             ui.label("WHAT ASCEND DOES").classes("text-xs tracking-[0.3em] text-gray-400")
             with ui.row().classes("w-full max-w-6xl mt-6 gap-4 justify-center"):
                 with ui.card().classes("glass-card feature-card w-80 p-5"):
-                    ui.icon("timeline").classes("text-sky-400 text-2xl")
+                    ui.icon("timeline").classes("text-white text-2xl")
                     ui.label("Live SGPA Trajectory").classes("font-semibold text-white mt-2")
                     ui.label("See if your current pace can still hit your target before exams arrive.").classes(
                         "text-sm text-gray-300"
                     )
                 with ui.card().classes("glass-card feature-card w-80 p-5"):
-                    ui.icon("auto_graph").classes("text-violet-300 text-2xl")
+                    ui.icon("auto_graph").classes("text-white text-2xl")
                     ui.label("Required Marks Clarity").classes("font-semibold text-white mt-2")
                     ui.label("Know exactly what you need on each remaining assessment item.").classes(
                         "text-sm text-gray-300"
                     )
                 with ui.card().classes("glass-card feature-card w-80 p-5"):
-                    ui.icon("folder_special").classes("text-sky-300 text-2xl")
+                    ui.icon("folder_special").classes("text-white text-2xl")
                     ui.label("Minimal Course Workspace").classes("font-semibold text-white mt-2")
                     ui.label("Register courses cleanly, organize components, and stay consistent daily.").classes(
                         "text-sm text-gray-300"
@@ -468,7 +725,7 @@ def landing_page() -> None:
             minWidth: 200.0,
             scale: 1.0,
             scaleMobile: 1.0,
-            color: 0x7c3aed,
+            color: 0x9e0028,
             backgroundColor: 0x000000,
             points: 10.0,
             maxDistance: 18.0,
@@ -509,11 +766,11 @@ def login_page() -> None:
 
     def do_login(email: str, password: str, _unused: Optional[str]) -> None:
         if not email or not password:
-            ui.notify("Please enter both email and password.", color="negative")
+            notify_toast("Please enter both email and password.", color="negative")
             return
         app.storage.user["auth_email"] = email
         bind_user(email, is_new=False)
-        ui.notify("Login successful.", color="positive")
+        notify_toast("Login successful.", color="positive")
         ui.navigate.to("/dashboard")
 
     auth_card("Login to Ascend", "Continue your semester momentum.", "Login", do_login)
@@ -526,14 +783,14 @@ def signup_page() -> None:
 
     def do_signup(email: str, password: str, confirm: Optional[str]) -> None:
         if not email or not password:
-            ui.notify("Email and password are required.", color="negative")
+            notify_toast("Email and password are required.", color="negative")
             return
         if confirm != password:
-            ui.notify("Passwords do not match.", color="negative")
+            notify_toast("Passwords do not match.", color="negative")
             return
         app.storage.user["auth_email"] = email
         bind_user(email, is_new=True)
-        ui.notify("Account created. Your data will be saved to your profile.", color="positive")
+        notify_toast("Account created. Your data will be saved to your profile.", color="positive")
         ui.navigate.to("/dashboard")
 
     auth_card("Sign Up for Ascend", "Create your profile and start tracking.", "Create Account", do_signup)
@@ -548,17 +805,179 @@ def semester_overview() -> None:
     projected = sem.sgpa_projected()
     actual = sem.sgpa_actual()
 
+    # Track previous values in app.storage.user for count-up animation
+    prev_projected = app.storage.user.get("prev_projected", projected)
+    prev_actual = app.storage.user.get("prev_actual", actual)
+    
+    app.storage.user["prev_projected"] = projected
+    app.storage.user["prev_actual"] = actual
+
+    prev_proj_val = prev_projected if prev_projected is not None else (projected if projected is not None else 0)
+    proj_val = projected if projected is not None else 0
+    prev_act_val = prev_actual if prev_actual is not None else (actual if actual is not None else 0)
+    act_val = actual if actual is not None else 0
+
     with ui.row().classes("w-full gap-4 flex-wrap justify-center"):
-        for title, value, tone in [
-            ("Target GPA", f"{sem.target_sgpa:.2f}", "text-violet-300"),
-            ("Projected GPA", f"{projected:.3f}" if projected is not None else "-", "text-sky-300"),
-            ("Actual GPA", f"{actual:.3f}" if actual is not None else "-", "text-indigo-300"),
+        for title, value, tone, el_id in [
+            ("Target GPA", f"{sem.target_sgpa:.2f}", "text-[#d61a3c]", "target-gpa"),
+            ("Projected GPA", f"{projected:.3f}" if projected is not None else "-", "text-white", "projected-gpa"),
+            ("Actual GPA", f"{actual:.3f}" if actual is not None else "-", "text-white", "actual-gpa"),
         ]:
             with ui.card().classes("glass-card p-5 min-w-52 text-center"):
                 ui.label(title).classes("text-gray-400 text-xs uppercase tracking-wider")
-                ui.label(value).classes(f"text-3xl font-bold {tone} mt-1")
+                lbl = ui.label(value).classes(f"text-3xl font-bold {tone} mt-1")
+                if el_id != "target-gpa":
+                    lbl.props(f'id="{el_id}"')
+
+    if projected is not None:
+        ui.run_javascript(f"setTimeout(() => window.animateGPA('projected-gpa', '{prev_proj_val}', '{proj_val}'), 100);")
+    if actual is not None:
+        ui.run_javascript(f"setTimeout(() => window.animateGPA('actual-gpa', '{prev_act_val}', '{act_val}'), 100);")
 
     ui.label(ui_gpa_text(semester_pace_message(sem))).classes("cli-text mt-4 text-center w-full")
+
+    # Task 4: ECharts SGPA Trajectory Chart
+    ranking = sem.sensitivity_ranking()
+    if ranking and len(sem.courses) > 0:
+        ordered_courses = []
+        for r in ranking:
+            for c in sem.courses:
+                if c.name == r["course"]:
+                    ordered_courses.append(c)
+                    break
+        
+        x_labels = []
+        actual_data = []
+        projected_data = []
+        ceiling_data = []
+        
+        cum_ch = 0.0
+        cum_act_gp = 0.0
+        cum_proj_gp = 0.0
+        cum_ceil_gp = 0.0
+        
+        for c in ordered_courses:
+            x_labels.append(c.name)
+            
+            act_pct = c.projected_percent(assume_target_on_incomplete=False)
+            proj_pct = c.projected_percent()
+            ceil_pct = c.best_case_percent()
+            
+            act_gp = percentage_to_grade(act_pct)[1]
+            proj_gp = percentage_to_grade(proj_pct)[1]
+            ceil_gp = percentage_to_grade(ceil_pct)[1]
+            
+            cum_ch += c.credit_hours
+            cum_act_gp += act_gp * c.credit_hours
+            cum_proj_gp += proj_gp * c.credit_hours
+            cum_ceil_gp += ceil_gp * c.credit_hours
+            
+            actual_data.append(round(cum_act_gp / cum_ch, 3))
+            projected_data.append(round(cum_proj_gp / cum_ch, 3))
+            ceiling_data.append(round(cum_ceil_gp / cum_ch, 3))
+            
+        chart_options = {
+            "title": {
+                "text": "SGPA Trajectory (Cumulative by Course Leverage)",
+                "left": "center",
+                "textStyle": {
+                    "color": "#ffffff",
+                    "fontSize": 14,
+                    "fontWeight": "bold"
+                }
+            },
+            "tooltip": {
+                "trigger": "axis",
+                "backgroundColor": "rgba(15, 15, 20, 0.95)",
+                "borderColor": "#d61a3c",
+                "textStyle": {
+                    "color": "#ffffff"
+                }
+            },
+            "legend": {
+                "data": ["Honest Trajectory", "Projected SGPA", "Ceiling SGPA"],
+                "bottom": 0,
+                "textStyle": {
+                    "color": "#cccccc"
+                }
+            },
+            "grid": {
+                "top": "15%",
+                "left": "10%",
+                "right": "10%",
+                "bottom": "15%",
+                "containLabel": True
+            },
+            "xAxis": {
+                "type": "category",
+                "boundaryGap": True,
+                "data": x_labels,
+                "axisLabel": {
+                    "color": "#cccccc",
+                    "rotate": 15
+                },
+                "axisLine": {
+                    "lineStyle": {
+                        "color": "rgba(214, 26, 60, 0.3)"
+                    }
+                }
+            },
+            "yAxis": {
+                "type": "value",
+                "min": 0,
+                "max": 4.0,
+                "axisLabel": {
+                    "color": "#cccccc"
+                },
+                "axisLine": {
+                    "lineStyle": {
+                        "color": "rgba(214, 26, 60, 0.3)"
+                    }
+                },
+                "splitLine": {
+                    "lineStyle": {
+                        "color": "rgba(255, 255, 255, 0.05)"
+                    }
+                }
+            },
+            "series": [
+                {
+                    "name": "Honest Trajectory",
+                    "type": "line",
+                    "data": actual_data,
+                    "color": "#d61a3c",
+                    "symbolSize": 8,
+                    "lineStyle": {
+                        "width": 3
+                    }
+                },
+                {
+                    "name": "Projected SGPA",
+                    "type": "line",
+                    "data": projected_data,
+                    "color": "#3b82f6",
+                    "symbolSize": 8,
+                    "lineStyle": {
+                        "width": 2,
+                        "type": "dashed"
+                    }
+                },
+                {
+                    "name": "Ceiling SGPA",
+                    "type": "line",
+                    "data": ceiling_data,
+                    "color": "#10b981",
+                    "symbolSize": 8,
+                    "lineStyle": {
+                        "width": 2,
+                        "type": "dotted"
+                    }
+                }
+            ]
+        }
+        
+        with ui.card().classes("glass-card w-full p-4 mt-6 h-80"):
+            ui.echart(options=chart_options).classes("w-full h-full")
 
     ui.label("Prioritisation (highest-leverage courses first)").classes(
         "text-white font-semibold mt-6 mb-2"
@@ -593,7 +1012,7 @@ def courses_grid() -> None:
         if 0 <= course_idx < len(sem.courses):
             removed = sem.courses.pop(course_idx)
             save_data()
-            ui.notify(f"Removed course '{removed.name}'.", color="info")
+            notify_toast(f"Removed course '{removed.name}'.", color="info")
             courses_grid.refresh()
             semester_overview.refresh()
 
@@ -616,15 +1035,15 @@ def courses_grid() -> None:
                 ):
                     with ui.row().classes("items-center gap-2 mb-1"):
                         ui.label(f"Course {idx + 1}").classes(
-                            "text-[10px] uppercase tracking-[0.2em] text-violet-300 font-semibold"
+                            "text-[10px] uppercase tracking-[0.2em] text-white font-semibold"
                         )
                     ui.label(course.name).classes("text-xl text-white font-bold leading-tight")
                     ui.label(f"{course.credit_hours} credit hours · {tgt_txt}").classes(
                         "text-sm text-gray-400 mt-1"
                     )
-                    ui.label(f"Projected: {letter} ({gp:.2f})").classes("text-sm text-sky-300 mt-2")
+                    ui.label(f"Projected: {letter} ({gp:.2f})").classes("text-sm text-white mt-2")
                     ui.label("Open marks & required report →").classes(
-                        "text-xs text-violet-300 mt-3"
+                        "text-xs text-white mt-3"
                     )
 
 
@@ -659,13 +1078,13 @@ def dashboard_page() -> None:
     with ui.column().classes("w-full px-4 md:px-10 py-6"):
         with ui.column().classes("w-full items-center text-center mb-6"):
             ui.label("Semester Dashboard").classes("text-4xl md:text-5xl font-black dashboard-title")
-            ui.label(sem.name).classes("text-sky-300 text-lg tracking-widest mt-2")
+            ui.label(sem.name).classes("text-white text-lg tracking-widest mt-2")
             ui.label(
                 f"Target GPA: {sem.target_sgpa:.2f}  ·  {sem.total_credit_hours()} credit hours"
             ).classes("cli-hint mt-1")
 
         with ui.card().classes("glass-card w-full p-4 mt-2"):
-            ui.label("Active Semester").classes("text-violet-300 font-semibold")
+            ui.label("Active Semester").classes("text-white font-semibold")
             ui.label(
                 "One semester is active at a time. Update the details below, switch to another, or create a new one."
             ).classes("cli-hint mb-3")
@@ -705,13 +1124,13 @@ def dashboard_page() -> None:
 
                 def save_semester() -> None:
                     if not sem_name.value:
-                        ui.notify("Semester name is required.", color="negative")
+                        notify_toast("Semester name is required.", color="negative")
                         return
                     active = ensure_semester()
                     active.name = sem_name.value
                     active.target_sgpa = float(sem_target.value or 3.2)
                     save_data()
-                    ui.notify(
+                    notify_toast(
                         f"Semester '{active.name}' saved with target GPA {active.target_sgpa:.2f}.",
                         color="positive",
                     )
@@ -724,7 +1143,7 @@ def dashboard_page() -> None:
                     app_data.semesters.append(new_sem)
                     app_data.active_semester_index = len(app_data.semesters) - 1
                     save_data()
-                    ui.notify(
+                    notify_toast(
                         f"New semester '{new_name}' created with target GPA {new_target:.2f}.",
                         color="positive",
                     )
@@ -741,7 +1160,7 @@ def dashboard_page() -> None:
 
         # --- Finalize Semester ---
         with ui.card().classes("glass-card w-full p-4 mt-4"):
-            ui.label("Finalize Semester").classes("text-violet-300 font-semibold")
+            ui.label("Finalize Semester").classes("text-white font-semibold")
             ui.label(
                 "Once all marks are entered and confirmed, finalize this semester to lock in the actual GPA. "
                 "This marks the semester as complete and records the real SGPA."
@@ -752,10 +1171,10 @@ def dashboard_page() -> None:
 
             if sem.finalized:
                 with ui.row().classes("items-center gap-3"):
-                    ui.icon("lock").classes("text-sky-300 text-xl")
+                    ui.icon("lock").classes("text-white text-xl")
                     ui.label(
                         f"This semester is finalized. Actual GPA: {sem.actual_sgpa:.3f}"
-                    ).classes("text-sky-300 font-semibold")
+                    ).classes("text-white font-semibold")
             elif not sem.courses:
                 ui.label("Register courses first before finalizing.").classes("cli-hint")
             elif not all_complete:
@@ -769,13 +1188,13 @@ def dashboard_page() -> None:
             else:
                 ui.label(
                     f"All courses are fully graded. Actual GPA: {actual:.3f}"
-                ).classes("text-sky-300 font-semibold")
+                ).classes("text-white font-semibold")
 
                 def finalize_sem() -> None:
                     sem.finalized = True
                     sem.actual_sgpa = sem.sgpa_actual()
                     save_data()
-                    ui.notify(
+                    notify_toast(
                         f"Semester '{sem.name}' finalized with GPA {sem.actual_sgpa:.3f}.",
                         color="positive",
                     )
@@ -786,20 +1205,20 @@ def dashboard_page() -> None:
                 ).classes("mt-2")
 
         semester_overview()
-        ui.separator().classes("bg-violet-400/20 my-6")
+        ui.separator().classes("bg-[#800020]/25 my-6")
 
         with ui.row().classes("w-full gap-2 flex-wrap mb-4"):
             def apply_uniform() -> None:
                 active = ensure_semester()
                 active.apply_uniform_target()
                 save_data()
-                ui.notify("Uniform target applied to all courses.", color="positive")
+                notify_toast("Uniform target applied to all courses.", color="positive")
                 semester_overview.refresh()
                 courses_grid.refresh()
 
             def save_now() -> None:
                 save_data()
-                ui.notify(f"Saved to {user_data_path()}", color="positive")
+                notify_toast(f"Saved to {user_data_path()}", color="positive")
 
             ui.button(
                 "Apply uniform target to all courses in active semester",
@@ -874,7 +1293,7 @@ def dashboard_page() -> None:
                 def register_course() -> None:
                     active = ensure_semester()
                     if not name.value:
-                        ui.notify("Course name is required.", color="negative")
+                        notify_toast("Course name is required.", color="negative")
                         return
                     ch = float(credit_hours.value or 0)
                     if has_lab.value:
@@ -891,12 +1310,12 @@ def dashboard_page() -> None:
                     if set_target_now.value:
                         try:
                             course.set_target_from_letter(str(target_letter.value).upper())
-                            ui.notify(
+                            notify_toast(
                                 f"Target set: {target_letter.value} -> aiming for >= {course.target_percent:.0f}%",
                                 color="info",
                             )
                         except ValueError:
-                            ui.notify(
+                            notify_toast(
                                 "Unrecognised letter, skipping — you can set it later.",
                                 color="warning",
                             )
@@ -933,7 +1352,7 @@ def dashboard_page() -> None:
 
                     active.add_course(course)
                     save_data()
-                    ui.notify(
+                    notify_toast(
                         f"Course '{course.name}' registered ({course.credit_hours} credit hours).",
                         color="positive",
                     )
@@ -977,7 +1396,7 @@ def course_page(course_idx: int) -> None:
             "flat color=primary"
         )
         ui.label(f"Course {course_idx + 1}").classes(
-            "text-xs uppercase tracking-[0.25em] text-violet-300 font-semibold"
+            "text-xs uppercase tracking-[0.25em] text-white font-semibold"
         )
         ui.label(course.name).classes("text-3xl font-bold text-white")
         ui.label(
@@ -1002,7 +1421,7 @@ def course_page(course_idx: int) -> None:
 
             # ---- Set / change target ----
             with ui.card().classes("glass-card w-full p-5"):
-                ui.label(f"Set Target: {c.name}").classes("text-violet-300 font-semibold")
+                ui.label(f"Set Target: {c.name}").classes("text-white font-semibold")
                 current = (
                     f"{c.target_percent:.0f}%"
                     if c.target_percent is not None
@@ -1041,7 +1460,7 @@ def course_page(course_idx: int) -> None:
                         c.target_percent = pct
                         letter, gp = percentage_to_grade(pct)
                         save_data()
-                        ui.notify(
+                        notify_toast(
                             f"Target set: {pct:.0f}% (currently maps to {letter}, {gp:.2f})",
                             color="positive",
                         )
@@ -1049,12 +1468,12 @@ def course_page(course_idx: int) -> None:
                         try:
                             c.set_target_from_letter(str(letter_in.value).upper())
                             save_data()
-                            ui.notify(
+                            notify_toast(
                                 f"Target set: {letter_in.value} -> aiming for >= {c.target_percent:.0f}%",
                                 color="positive",
                             )
                         except ValueError:
-                            ui.notify("Unrecognised letter grade — nothing changed.", color="negative")
+                            notify_toast("Unrecognised letter grade — nothing changed.", color="negative")
                             return
                     required_report_panel.refresh()
                     what_if_panel.refresh()
@@ -1064,7 +1483,7 @@ def course_page(course_idx: int) -> None:
 
             # ---- Enter marks ----
             with ui.card().classes("glass-card w-full p-5"):
-                ui.label("Enter marks for a course").classes("text-violet-300 font-semibold")
+                ui.label("Enter marks for a course").classes("text-white font-semibold")
                 portions: List[Tuple[str, object]] = [("theory", c.theory)]
                 if c.has_lab and c.lab:
                     portions.append(("lab", c.lab))
@@ -1119,10 +1538,10 @@ def course_page(course_idx: int) -> None:
                                     continue
                                 marks = float(field.value)
                                 if marks < 0:
-                                    ui.notify("Marks can't be negative — not saved.", color="negative")
+                                    notify_toast("Marks can't be negative — not saved.", color="negative")
                                     continue
                                 if marks > item.max_marks:
-                                    ui.notify(
+                                    notify_toast(
                                         f"Note: {marks} is above the max of {item.max_marks} — "
                                         "saving anyway in case of bonus marks.",
                                         color="warning",
@@ -1132,24 +1551,24 @@ def course_page(course_idx: int) -> None:
                                 item.obtained_marks = marks
                                 after = portion_now.pace_status(tgt)
                                 saved_any = True
-                                ui.notify(
-                                    f"Saved: {item.name} = {marks}/{item.max_marks} ({item.percent_score:.1f}%)",
-                                    color="positive",
+                                notify_toast(
+                                    f"Recalculated: {course.projected_percent():.1f}% → {course.projected_grade()[0]}",
+                                    color="custom",
                                 )
                                 if needed_before is not None:
                                     if item.percent_score >= needed_before - 1e-9:
-                                        ui.notify(
+                                        notify_toast(
                                             f"That's at or above the ~{needed_before:.2f}% this item needed — "
                                             "nice, it eases up what's left.",
                                             color="info",
                                         )
                                     else:
-                                        ui.notify(
+                                        notify_toast(
                                             f"That's below the ~{needed_before:.2f}% this item needed.",
                                             color="warning",
                                         )
                                 if before["target_still_possible"] and not after["target_still_possible"]:
-                                    ui.notify(
+                                    notify_toast(
                                         f"WARNING: this drops your ceiling below target. Even 100% on everything "
                                         f"else now caps you at {after['best_case_percent']}% ({after['best_case_grade']}) — "
                                         "your target grade here is no longer reachable.",
@@ -1162,7 +1581,7 @@ def course_page(course_idx: int) -> None:
                                     and after["required_avg_on_remaining"]
                                     > before["required_avg_on_remaining"] + 1e-9
                                 ):
-                                    ui.notify(
+                                    notify_toast(
                                         f"Heads-up: this raises what you need on the rest, from "
                                         f"{before['required_avg_on_remaining']:.2f}% to "
                                         f"{after['required_avg_on_remaining']:.2f}%.",
@@ -1174,8 +1593,9 @@ def course_page(course_idx: int) -> None:
                             marks_form.refresh()
                             required_report_panel.refresh()
                             what_if_panel.refresh()
+                            semester_overview.refresh()
                         else:
-                            ui.notify("Enter at least one mark value to save.", color="warning")
+                            notify_toast("Enter at least one mark value to save.", color="warning")
 
                     ui.button("Save entered marks", on_click=save_marks).props(
                         "color=primary unelevated"
@@ -1191,7 +1611,7 @@ def course_page(course_idx: int) -> None:
             proj = c.projected_percent()
             letter, gp = percentage_to_grade(proj)
 
-            ui.label("Grade calculator").classes("text-violet-300 font-semibold text-lg")
+            ui.label("Grade calculator").classes("text-white font-semibold text-lg")
             ui.label(
                 "Uses saved marks plus the official grading scale to tell you the current / projected letter grade, "
                 "and what you still need on one upcoming item."
@@ -1200,7 +1620,7 @@ def course_page(course_idx: int) -> None:
             with ui.row().classes("w-full gap-4 flex-wrap mb-4"):
                 with ui.card().classes("glass-card p-4 min-w-44"):
                     ui.label("From saved marks").classes("text-gray-400 text-xs uppercase")
-                    ui.label(f"{proj:.1f}%").classes("text-2xl font-bold text-sky-300")
+                    ui.label(f"{proj:.1f}%").classes("text-2xl font-bold text-white")
                     ui.label(f"{letter}  ({gp:.2f})").classes("grade-chip mt-1")
                 if c.is_complete():
                     overall = c.overall_percent()
@@ -1214,7 +1634,7 @@ def course_page(course_idx: int) -> None:
                     bl, bgp = percentage_to_grade(best)
                     with ui.card().classes("glass-card p-4 min-w-44"):
                         ui.label("Best case remaining").classes("text-gray-400 text-xs uppercase")
-                        ui.label(f"{best:.1f}%").classes("text-2xl font-bold text-violet-300")
+                        ui.label(f"{best:.1f}%").classes("text-2xl font-bold text-white")
                         ui.label(f"{bl}  ({bgp:.2f})").classes("grade-chip mt-1")
 
             portions2: List[Tuple[str, object]] = [("theory", c.theory)]
@@ -1291,12 +1711,12 @@ def course_page(course_idx: int) -> None:
                             overall = c.overall_percent()
                             fl, fgp = c.grade()
                             ui.label(f"Your grade from saved marks: {overall:.2f}% → {fl} ({fgp:.2f})").classes(
-                                "text-sky-300 mt-2"
+                                "text-white mt-2"
                             )
                         return
                     idx = int(item_select.value if item_select.value is not None else 0)
                     if not (0 <= idx < len(pending)):
-                        ui.notify("Pick an upcoming item from the dropdown.", color="negative")
+                        notify_toast("Pick an upcoming item from the dropdown.", color="negative")
                         return
                     _, target_item = pending[idx]
                     assumed = {
@@ -1308,7 +1728,7 @@ def course_page(course_idx: int) -> None:
                         pname, target_item.name, target_percent=tgt, assumed_scores=assumed
                     )
                     if needed_pct is None:
-                        ui.notify("Could not compute — check the item and try again.", color="negative")
+                        notify_toast("Could not compute — check the item and try again.", color="negative")
                         return
                     needed_marks = (needed_pct / 100) * target_item.max_marks
                     with ui.element("div").classes("pace-box w-full"):
@@ -1327,7 +1747,7 @@ def course_page(course_idx: int) -> None:
                         else:
                             ui.label(
                                 f"you need {needed_marks:.2f} / {target_item.max_marks} ({needed_pct:.2f}%) on '{target_item.name}'."
-                            ).classes("text-sky-300 mt-1")
+                            ).classes("text-white mt-1")
                     ui.label(f"Current projected grade from saved marks: {letter} ({gp:.2f}) at {proj:.1f}%").classes(
                         "cli-hint mt-2"
                     )
@@ -1369,7 +1789,7 @@ def cgpa_page() -> None:
 
         @ui.refreshable
         def history_panel() -> None:
-            ui.label("Semester history").classes("text-violet-300 font-semibold mb-2")
+            ui.label("Semester history").classes("text-white font-semibold mb-2")
             if not app_data.cgpa.semesters:
                 ui.label("No semester history yet. Add one below.").classes("cli-hint")
                 return
@@ -1395,18 +1815,18 @@ def cgpa_page() -> None:
                 with ui.row().classes("w-full gap-4 mt-4 flex-wrap"):
                     with ui.card().classes("glass-card p-4"):
                         ui.label("CGPA").classes("text-gray-400 text-xs uppercase")
-                        ui.label(f"{c:.3f}").classes("text-3xl font-bold text-sky-300")
+                        ui.label(f"{c:.3f}").classes("text-3xl font-bold text-white")
                     with ui.card().classes("glass-card p-4"):
                         ui.label("Equivalent percentage").classes("text-gray-400 text-xs uppercase")
                         ui.label(f"{app_data.cgpa.percentage_equivalent():.2f}%").classes(
-                            "text-3xl font-bold text-violet-300"
+                            "text-3xl font-bold text-white"
                         )
 
         with ui.card().classes("glass-card w-full p-5"):
             history_panel()
 
         with ui.card().classes("glass-card w-full p-5"):
-            ui.label("1) Add a past semester result manually").classes("text-violet-300 font-semibold")
+            ui.label("1) Add a past semester result manually").classes("text-white font-semibold")
             past_name = ui.input("Semester name").props(FIELD).classes("w-full")
             past_sgpa = ui.number("GPA (out of 4.00)", value=3.0, min=0, max=4, step=0.01).props(
                 FIELD
@@ -1417,20 +1837,20 @@ def cgpa_page() -> None:
 
             def add_manual() -> None:
                 if not past_name.value:
-                    ui.notify("Semester name is required.", color="negative")
+                    notify_toast("Semester name is required.", color="negative")
                     return
                 app_data.cgpa.add(
                     past_name.value, float(past_sgpa.value or 0), float(past_ch.value or 0)
                 )
                 save_data()
-                ui.notify(f"Added {past_name.value}.", color="positive")
+                notify_toast(f"Added {past_name.value}.", color="positive")
                 history_panel.refresh()
 
             ui.button("Add manually", on_click=add_manual).props("color=primary unelevated")
 
         with ui.card().classes("glass-card w-full p-5"):
             ui.label("2) Pull in a tracked semester's GPA automatically").classes(
-                "text-violet-300 font-semibold"
+                "text-white font-semibold"
             )
             if not app_data.semesters:
                 ui.label("No tracked semesters yet.").classes("cli-text")
@@ -1449,17 +1869,17 @@ def cgpa_page() -> None:
                     s = app_data.semesters[idx]
                     val = s.actual_sgpa if s.finalized else s.sgpa_projected()
                     if val is None:
-                        ui.notify("No GPA available yet for that semester.", color="warning")
+                        notify_toast("No GPA available yet for that semester.", color="warning")
                         return
                     app_data.cgpa.add(s.name, val, s.total_credit_hours())
                     save_data()
-                    ui.notify(f"Added {s.name} ({val:.3f}) to CGPA history.", color="positive")
+                    notify_toast(f"Added {s.name} ({val:.3f}) to CGPA history.", color="positive")
                     history_panel.refresh()
 
                 ui.button("Pull selected semester", on_click=pull_tracked).props("color=primary unelevated")
 
         with ui.card().classes("glass-card w-full p-5"):
-            ui.label("3) Remove a semester entry").classes("text-violet-300 font-semibold")
+            ui.label("3) Remove a semester entry").classes("text-white font-semibold")
             rem = ui.input("Semester name to remove").props(FIELD).classes("w-full")
 
             def remove_entry() -> None:
@@ -1467,7 +1887,7 @@ def cgpa_page() -> None:
                     return
                 app_data.cgpa.remove(rem.value)
                 save_data()
-                ui.notify(f"Removed '{rem.value}' (if it existed).", color="info")
+                notify_toast(f"Removed '{rem.value}' (if it existed).", color="info")
                 history_panel.refresh()
 
             ui.button("Remove", on_click=remove_entry).props("outline color=negative")
@@ -1477,6 +1897,7 @@ if __name__ in {"__main__", "__mp_main__"}:
     app.add_static_files("/assets", "assets")
     ui.run(
         title="Ascend",
+        favicon="assets/favicon.ico",
         dark=True,
         storage_secret="ascend-dev-secret-key",
         reload=False,
